@@ -299,7 +299,8 @@ class FileMover:
     """Handles file moving operations."""
 
     def __init__(self, real_source: str, cache_dir: str, is_unraid: bool,
-                 file_utils, debug: bool = False, mover_cache_exclude_file: Optional[str] = None):
+                 file_utils, debug: bool = False, mover_cache_exclude_file: Optional[str] = None,
+                 progress_interval: int = 10):
         self.real_source = real_source
         self.cache_dir = cache_dir
         self.is_unraid = is_unraid
@@ -307,6 +308,10 @@ class FileMover:
         self.debug = debug
         self.mover_cache_exclude_file = mover_cache_exclude_file
         self._exclude_file_lock = threading.Lock()
+        self._progress_lock = threading.Lock()
+        self._progress_interval = progress_interval
+        self._completed_count = 0
+        self._total_count = 0
     
     def move_media_files(self, files: List[str], destination: str, 
                         max_concurrent_moves_array: int, max_concurrent_moves_cache: int) -> None:
@@ -384,20 +389,39 @@ class FileMover:
                 move = (user_file_name, cache_path)
         return move
     
-    def _execute_move_commands(self, move_commands: List[Tuple[Tuple[str, str], str]], 
-                             max_concurrent_moves_array: int, max_concurrent_moves_cache: int, 
+    def _execute_move_commands(self, move_commands: List[Tuple[Tuple[str, str], str]],
+                             max_concurrent_moves_array: int, max_concurrent_moves_cache: int,
                              destination: str) -> None:
         """Execute the move commands."""
+        # Initialize progress tracking
+        self._completed_count = 0
+        self._total_count = len(move_commands)
+
         if self.debug:
-            for move_cmd, cache_file_name in move_commands:
+            for i, (move_cmd, cache_file_name) in enumerate(move_commands, 1):
                 logging.info(move_cmd)
+                if self._total_count > 0 and i % self._progress_interval == 0:
+                    self._print_progress(i, destination)
+            if self._total_count > 0:
+                self._print_progress(self._total_count, destination, final=True)
         else:
             max_concurrent_moves = max_concurrent_moves_array if destination == 'array' else max_concurrent_moves_cache
             from functools import partial
             with ThreadPoolExecutor(max_workers=max_concurrent_moves) as executor:
                 results = list(executor.map(partial(self._move_file, destination=destination), move_commands))
                 errors = [result for result in results if result != 0]
+                # Print final progress
+                if self._total_count > 0:
+                    self._print_progress(self._completed_count, destination, final=True)
                 logging.info(f"Finished moving files with {len(errors)} errors.")
+
+    def _print_progress(self, completed: int, destination: str, final: bool = False) -> None:
+        """Print progress update."""
+        if self._total_count == 0:
+            return
+        percentage = (completed / self._total_count) * 100
+        status = "Complete" if final else "Progress"
+        print(f"{status}: {completed}/{self._total_count} files ({percentage:.1f}%) moved to {destination}")
     
     def _move_file(self, move_cmd_with_cache: Tuple[Tuple[str, str], str], destination: str) -> int:
         """Move a single file and update exclude file if moving to cache."""
@@ -411,6 +435,13 @@ class FileMover:
                 with self._exclude_file_lock:
                     with open(self.mover_cache_exclude_file, "a") as f:
                         f.write(f"{cache_file_name}\n")
+
+            # Update progress counter and print progress at intervals
+            with self._progress_lock:
+                self._completed_count += 1
+                if self._completed_count % self._progress_interval == 0:
+                    self._print_progress(self._completed_count, destination)
+
             return 0
         except Exception as e:
             logging.error(f"Error moving file: {type(e).__name__}: {e}")

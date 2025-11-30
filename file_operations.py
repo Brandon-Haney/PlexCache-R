@@ -420,8 +420,10 @@ class FileMover:
         if self._total_count == 0:
             return
         percentage = (completed / self._total_count) * 100
-        status = "Complete" if final else "Progress"
-        print(f"{status}: {completed}/{self._total_count} files ({percentage:.1f}%) moved to {destination}")
+        if final:
+            print(f"\n>>> COMPLETE: {completed}/{self._total_count} files (100%) moved to {destination} <<<\n")
+        else:
+            print(f"\n>>> PROGRESS: {completed}/{self._total_count} files ({percentage:.1f}%) moved to {destination} <<<\n")
     
     def _move_file(self, move_cmd_with_cache: Tuple[Tuple[str, str], str], destination: str) -> int:
         """Move a single file and update exclude file if moving to cache."""

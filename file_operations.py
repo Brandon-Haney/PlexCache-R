@@ -439,13 +439,17 @@ class FileMover:
         """Move a single file and update exclude file if moving to cache."""
         (src, dest), cache_file_name = move_cmd_with_cache
         try:
+            # Show which file is being moved before starting
+            filename = os.path.basename(src)
+            with self._progress_lock:
+                print()  # New line after progress bar
+                print(f"  -> Moving: {filename}")
+
             self.file_utils.move_file(src, dest)
 
             # Update progress counter and print progress
             with self._progress_lock:
                 self._completed_count += 1
-                # Clear the progress line, print log, then reprint progress
-                print()  # Move to new line
                 logging.info(f"Moved file from {src} to {dest} with original permissions and owner.")
                 self._print_progress(self._completed_count, destination)
 

@@ -437,53 +437,31 @@ class FileMover:
         filled = int(bar_width * completed / self._total_count)
         bar = '█' * filled + '░' * (bar_width - filled)
 
-        # Clear previous output (move cursor up and clear lines)
-        # Calculate how many lines to clear: 1 for progress bar + active files
         active_files = list(self._active_files.values())
 
         if final:
-            # Clear the display area first
-            num_lines_to_clear = 1 + len(active_files) + 1  # progress + active + blank
-            print('\033[2K', end='')  # Clear current line
-            for _ in range(num_lines_to_clear):
-                print('\033[A\033[2K', end='')  # Move up and clear
-
-            # Print final summary
+            # Print final summary on new lines
+            print()
             print(f"[{bar}] 100% ({completed}/{self._total_count}) Moved to {destination} ✓")
             if self._completed_files:
-                print(f"  Completed: {', '.join(self._completed_files[-5:])}")  # Show last 5
+                # Show last 5 filenames truncated
+                last_files = [f[:50] + '...' if len(f) > 50 else f for f in self._completed_files[-5:]]
+                print(f"  Completed: {', '.join(last_files)}")
                 if len(self._completed_files) > 5:
                     print(f"  ... and {len(self._completed_files) - 5} more files")
         else:
-            # Build the display
-            lines = []
-            lines.append(f"[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}...")
+            # Build single-line status with active files
+            status = f"\r[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}..."
 
             if active_files:
-                lines.append(f"  Currently moving ({len(active_files)} active):")
-                for filename in active_files:
-                    lines.append(f"    -> {filename}")
+                # Truncate filenames and join them
+                truncated = [f[:30] + '...' if len(f) > 30 else f for f in active_files[:3]]
+                status += f" [{', '.join(truncated)}]"
+                if len(active_files) > 3:
+                    status += f" +{len(active_files) - 3} more"
 
-            # Track how many lines we're printing for later clearing
-            self._last_display_lines = len(lines)
-
-            # Print all lines
-            output = '\n'.join(lines)
-            print(f"\r{output}", end='', flush=True)
-
-    def _refresh_display(self, destination: str) -> None:
-        """Refresh the progress display, clearing previous lines first."""
-        # Use tracked line count from previous display
-        lines_to_clear = self._last_display_lines
-
-        # Move cursor up and clear each line
-        if lines_to_clear > 0:
-            for _ in range(lines_to_clear):
-                print('\033[A\033[2K', end='')
-
-        # Reprint progress
-        self._print_progress(destination)
-        print()  # Add newline after display
+            # Pad with spaces to clear previous longer content, then print
+            print(f"{status:<200}", end='', flush=True)
 
     def _move_file(self, move_cmd_with_cache: Tuple[Tuple[str, str], str], destination: str) -> int:
         """Move a single file and update exclude file if moving to cache."""
@@ -495,7 +473,7 @@ class FileMover:
             # Register this file as actively being moved
             with self._progress_lock:
                 self._active_files[thread_id] = filename
-                self._refresh_display(destination)
+                self._print_progress(destination)
 
             self.file_utils.move_file(src, dest)
 
@@ -505,7 +483,7 @@ class FileMover:
                 self._completed_files.append(filename)
                 del self._active_files[thread_id]
                 logging.info(f"Moved file from {src} to {dest} with original permissions and owner.")
-                self._refresh_display(destination)
+                self._print_progress(destination)
 
             # Only append to exclude file if moving to cache and move succeeded
             # Use lock to prevent concurrent writes from corrupting the file

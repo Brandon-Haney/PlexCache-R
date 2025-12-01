@@ -406,7 +406,6 @@ class FileMover:
         # Show initial progress bar
         if self._total_count > 0:
             self._print_progress(destination)
-            print()  # Newline after initial display
 
         if self.debug:
             for i, (move_cmd, cache_file_name) in enumerate(move_commands, 1):
@@ -439,9 +438,14 @@ class FileMover:
 
         active_files = list(self._active_files.values())
 
+        # Clear previous display first (move up and clear each line)
+        if self._last_display_lines > 0:
+            # Move cursor up for each line we previously printed, clearing each
+            for _ in range(self._last_display_lines):
+                print('\033[A\033[2K', end='')
+
         if final:
-            # Print final summary on new lines
-            print()
+            # Print final summary
             print(f"[{bar}] 100% ({completed}/{self._total_count}) Moved to {destination} ✓")
             if self._completed_files:
                 # Show last 5 filenames truncated
@@ -449,19 +453,21 @@ class FileMover:
                 print(f"  Completed: {', '.join(last_files)}")
                 if len(self._completed_files) > 5:
                     print(f"  ... and {len(self._completed_files) - 5} more files")
+            self._last_display_lines = 0
         else:
-            # Build single-line status with active files
-            status = f"\r[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}..."
+            # Build the display lines
+            lines = []
+            lines.append(f"[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}...")
 
             if active_files:
-                # Truncate filenames and join them
-                truncated = [f[:30] + '...' if len(f) > 30 else f for f in active_files[:3]]
-                status += f" [{', '.join(truncated)}]"
-                if len(active_files) > 3:
-                    status += f" +{len(active_files) - 3} more"
+                lines.append(f"  Currently moving ({len(active_files)} active):")
+                for filename in active_files:
+                    lines.append(f"    -> {filename}")
 
-            # Pad with spaces to clear previous longer content, then print
-            print(f"{status:<200}", end='', flush=True)
+            # Print all lines and track count for next clear
+            for line in lines:
+                print(line)
+            self._last_display_lines = len(lines)
 
     def _move_file(self, move_cmd_with_cache: Tuple[Tuple[str, str], str], destination: str) -> int:
         """Move a single file and update exclude file if moving to cache."""

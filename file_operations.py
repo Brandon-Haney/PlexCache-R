@@ -488,8 +488,10 @@ class FileMover:
                 self._completed_count += 1
                 self._completed_files.append(filename)
                 del self._active_files[thread_id]
-                logging.info(f"Moved file from {src} to {dest} with original permissions and owner.")
                 self._print_progress(destination)
+
+            # Log after progress update (outside lock, won't interfere with display)
+            logging.debug(f"Moved file from {src} to {dest} with original permissions and owner.")
 
             # Only append to exclude file if moving to cache and move succeeded
             # Use lock to prevent concurrent writes from corrupting the file

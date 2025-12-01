@@ -300,7 +300,7 @@ class FileMover:
 
     def __init__(self, real_source: str, cache_dir: str, is_unraid: bool,
                  file_utils, debug: bool = False, mover_cache_exclude_file: Optional[str] = None,
-                 progress_interval: int = 10):
+                 progress_interval: int = 1):
         self.real_source = real_source
         self.cache_dir = cache_dir
         self.is_unraid = is_unraid
@@ -397,11 +397,14 @@ class FileMover:
         self._completed_count = 0
         self._total_count = len(move_commands)
 
+        # Show initial progress bar
+        if self._total_count > 0:
+            self._print_progress(0, destination)
+
         if self.debug:
             for i, (move_cmd, cache_file_name) in enumerate(move_commands, 1):
                 logging.info(move_cmd)
-                if self._total_count > 0 and i % self._progress_interval == 0:
-                    self._print_progress(i, destination)
+                self._print_progress(i, destination)
             if self._total_count > 0:
                 self._print_progress(self._total_count, destination, final=True)
         else:
@@ -410,20 +413,27 @@ class FileMover:
             with ThreadPoolExecutor(max_workers=max_concurrent_moves) as executor:
                 results = list(executor.map(partial(self._move_file, destination=destination), move_commands))
                 errors = [result for result in results if result != 0]
-                # Print final progress
+                # Print final progress with newline
                 if self._total_count > 0:
                     self._print_progress(self._completed_count, destination, final=True)
                 logging.info(f"Finished moving files with {len(errors)} errors.")
 
     def _print_progress(self, completed: int, destination: str, final: bool = False) -> None:
-        """Print progress update."""
+        """Print progress update with visual progress bar."""
         if self._total_count == 0:
             return
+
         percentage = (completed / self._total_count) * 100
+        bar_width = 30
+        filled = int(bar_width * completed / self._total_count)
+        bar = '█' * filled + '░' * (bar_width - filled)
+
         if final:
-            print(f"\n>>> COMPLETE: {completed}/{self._total_count} files (100%) moved to {destination} <<<\n")
+            # Print final status on new line so it persists
+            print(f"\r[{bar}] 100% ({completed}/{self._total_count}) Moved to {destination} ✓")
         else:
-            print(f"\n>>> PROGRESS: {completed}/{self._total_count} files ({percentage:.1f}%) moved to {destination} <<<\n")
+            # Overwrite same line with \r
+            print(f"\r[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}...", end='', flush=True)
     
     def _move_file(self, move_cmd_with_cache: Tuple[Tuple[str, str], str], destination: str) -> int:
         """Move a single file and update exclude file if moving to cache."""

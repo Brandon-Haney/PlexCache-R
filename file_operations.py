@@ -312,6 +312,9 @@ class FileMover:
         self._progress_interval = progress_interval
         self._completed_count = 0
         self._total_count = 0
+        self._active_files = {}  # Thread ID -> filename mapping for queue display
+        self._completed_files = []  # List of completed filenames
+        self._last_display_lines = 0  # Track how many lines the last display used
     
     def move_media_files(self, files: List[str], destination: str, 
                         max_concurrent_moves_array: int, max_concurrent_moves_cache: int) -> None:
@@ -396,17 +399,22 @@ class FileMover:
         # Initialize progress tracking
         self._completed_count = 0
         self._total_count = len(move_commands)
+        self._active_files = {}
+        self._completed_files = []
+        self._last_display_lines = 0
 
         # Show initial progress bar
         if self._total_count > 0:
-            self._print_progress(0, destination)
+            self._print_progress(destination)
+            print()  # Newline after initial display
 
         if self.debug:
             for i, (move_cmd, cache_file_name) in enumerate(move_commands, 1):
                 logging.info(move_cmd)
-                self._print_progress(i, destination)
+                self._completed_count = i
+                self._print_progress(destination)
             if self._total_count > 0:
-                self._print_progress(self._total_count, destination, final=True)
+                self._print_progress(destination, final=True)
         else:
             max_concurrent_moves = max_concurrent_moves_array if destination == 'array' else max_concurrent_moves_cache
             from functools import partial
@@ -415,43 +423,89 @@ class FileMover:
                 errors = [result for result in results if result != 0]
                 # Print final progress with newline
                 if self._total_count > 0:
-                    self._print_progress(self._completed_count, destination, final=True)
+                    self._print_progress(destination, final=True)
                 logging.info(f"Finished moving files with {len(errors)} errors.")
 
-    def _print_progress(self, completed: int, destination: str, final: bool = False) -> None:
-        """Print progress update with visual progress bar."""
+    def _print_progress(self, destination: str, final: bool = False) -> None:
+        """Print progress update with visual progress bar and active file queue."""
         if self._total_count == 0:
             return
 
+        completed = self._completed_count
         percentage = (completed / self._total_count) * 100
         bar_width = 30
         filled = int(bar_width * completed / self._total_count)
         bar = '█' * filled + '░' * (bar_width - filled)
 
+        # Clear previous output (move cursor up and clear lines)
+        # Calculate how many lines to clear: 1 for progress bar + active files
+        active_files = list(self._active_files.values())
+
         if final:
-            # Print final status on new line so it persists
-            print(f"\r[{bar}] 100% ({completed}/{self._total_count}) Moved to {destination} ✓")
+            # Clear the display area first
+            num_lines_to_clear = 1 + len(active_files) + 1  # progress + active + blank
+            print('\033[2K', end='')  # Clear current line
+            for _ in range(num_lines_to_clear):
+                print('\033[A\033[2K', end='')  # Move up and clear
+
+            # Print final summary
+            print(f"[{bar}] 100% ({completed}/{self._total_count}) Moved to {destination} ✓")
+            if self._completed_files:
+                print(f"  Completed: {', '.join(self._completed_files[-5:])}")  # Show last 5
+                if len(self._completed_files) > 5:
+                    print(f"  ... and {len(self._completed_files) - 5} more files")
         else:
-            # Overwrite same line with \r
-            print(f"\r[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}...", end='', flush=True)
-    
+            # Build the display
+            lines = []
+            lines.append(f"[{bar}] {percentage:.0f}% ({completed}/{self._total_count}) Moving to {destination}...")
+
+            if active_files:
+                lines.append(f"  Currently moving ({len(active_files)} active):")
+                for filename in active_files:
+                    lines.append(f"    -> {filename}")
+
+            # Track how many lines we're printing for later clearing
+            self._last_display_lines = len(lines)
+
+            # Print all lines
+            output = '\n'.join(lines)
+            print(f"\r{output}", end='', flush=True)
+
+    def _refresh_display(self, destination: str) -> None:
+        """Refresh the progress display, clearing previous lines first."""
+        # Use tracked line count from previous display
+        lines_to_clear = self._last_display_lines
+
+        # Move cursor up and clear each line
+        if lines_to_clear > 0:
+            for _ in range(lines_to_clear):
+                print('\033[A\033[2K', end='')
+
+        # Reprint progress
+        self._print_progress(destination)
+        print()  # Add newline after display
+
     def _move_file(self, move_cmd_with_cache: Tuple[Tuple[str, str], str], destination: str) -> int:
         """Move a single file and update exclude file if moving to cache."""
         (src, dest), cache_file_name = move_cmd_with_cache
+        thread_id = threading.get_ident()
+        filename = os.path.basename(src)
+
         try:
-            # Show which file is being moved before starting
-            filename = os.path.basename(src)
+            # Register this file as actively being moved
             with self._progress_lock:
-                print()  # New line after progress bar
-                print(f"  -> Moving: {filename}")
+                self._active_files[thread_id] = filename
+                self._refresh_display(destination)
 
             self.file_utils.move_file(src, dest)
 
-            # Update progress counter and print progress
+            # Update progress counter and mark as completed
             with self._progress_lock:
                 self._completed_count += 1
+                self._completed_files.append(filename)
+                del self._active_files[thread_id]
                 logging.info(f"Moved file from {src} to {dest} with original permissions and owner.")
-                self._print_progress(self._completed_count, destination)
+                self._refresh_display(destination)
 
             # Only append to exclude file if moving to cache and move succeeded
             # Use lock to prevent concurrent writes from corrupting the file
@@ -462,6 +516,10 @@ class FileMover:
 
             return 0
         except Exception as e:
+            # Remove from active files on error
+            with self._progress_lock:
+                if thread_id in self._active_files:
+                    del self._active_files[thread_id]
             logging.error(f"Error moving file: {type(e).__name__}: {e}")
             return 1
 

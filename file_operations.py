@@ -440,19 +440,21 @@ class FileMover:
         (src, dest), cache_file_name = move_cmd_with_cache
         try:
             self.file_utils.move_file(src, dest)
-            logging.info(f"Moved file from {src} to {dest} with original permissions and owner.")
+
+            # Update progress counter and print progress
+            with self._progress_lock:
+                self._completed_count += 1
+                # Clear the progress line, print log, then reprint progress
+                print()  # Move to new line
+                logging.info(f"Moved file from {src} to {dest} with original permissions and owner.")
+                self._print_progress(self._completed_count, destination)
+
             # Only append to exclude file if moving to cache and move succeeded
             # Use lock to prevent concurrent writes from corrupting the file
             if destination == 'cache' and self.mover_cache_exclude_file:
                 with self._exclude_file_lock:
                     with open(self.mover_cache_exclude_file, "a") as f:
                         f.write(f"{cache_file_name}\n")
-
-            # Update progress counter and print progress at intervals
-            with self._progress_lock:
-                self._completed_count += 1
-                if self._completed_count % self._progress_interval == 0:
-                    self._print_progress(self._completed_count, destination)
 
             return 0
         except Exception as e:

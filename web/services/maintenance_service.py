@@ -289,9 +289,18 @@ class MaintenanceService:
             try:
                 stat_info = os.stat(cache_path) if os.path.exists(cache_path) else None
                 size = stat_info.st_size if stat_info else 0
-                # Use modification time (most reliable across platforms)
-                # st_birthtime only exists on some systems, st_mtime is universal
-                file_timestamp = stat_info.st_mtime if stat_info else None
+
+                # Use st_ctime (change time) for age detection on Linux/Unraid.
+                # Radarr/Sonarr preserve the original release mtime when downloading,
+                # but st_ctime is updated when the file is created on this filesystem.
+                # This gives us the actual "download time" not the release date.
+                #
+                # On Windows, st_ctime is creation time (also what we want).
+                # Fall back to st_mtime if st_ctime is somehow unavailable.
+                file_timestamp = stat_info.st_ctime if stat_info else None
+                if not file_timestamp and stat_info:
+                    file_timestamp = stat_info.st_mtime
+
                 created_at = datetime.fromtimestamp(file_timestamp) if file_timestamp else None
                 age_days = (now - created_at).total_seconds() / 86400 if created_at else 999
 
@@ -383,15 +392,23 @@ class MaintenanceService:
 
         return results
 
-    def _get_orphaned_plexcached(self) -> List[OrphanedBackup]:
-        """Find .plexcached files on array with no corresponding cache file"""
+    def _get_orphaned_plexcached(self, auto_cleanup_superseded: bool = True) -> List[OrphanedBackup]:
+        """Find .plexcached files on array with no corresponding cache file.
+
+        Args:
+            auto_cleanup_superseded: If True, automatically delete .plexcached backups
+                that have been superseded by a newer version (e.g., Sonarr/Radarr upgrades)
+        """
         cache_dirs, array_dirs = self._get_paths()
         cache_files = self.get_cache_files()
         orphaned = []
+        superseded_deleted = 0
 
         for i, array_dir in enumerate(array_dirs):
             if not os.path.exists(array_dir):
                 continue
+
+            cache_dir = cache_dirs[i]
 
             for root, dirs, files in os.walk(array_dir):
                 for f in files:
@@ -402,10 +419,26 @@ class MaintenanceService:
 
                         # Find corresponding cache path
                         relative_path = os.path.relpath(original_array_path, array_dir)
-                        cache_path = os.path.join(cache_dirs[i], relative_path)
+                        cache_path = os.path.join(cache_dir, relative_path)
+                        cache_directory = os.path.dirname(cache_path)
 
                         # Check if orphaned: no cache copy AND no restored original
                         if cache_path not in cache_files and not os.path.exists(original_array_path):
+                            # Check if this backup has been superseded by a newer version
+                            # (e.g., Sonarr/Radarr upgraded from HDTV to WEB-DL)
+                            if auto_cleanup_superseded:
+                                replacement = self._find_replacement_file(
+                                    original_name, cache_directory, cache_files
+                                )
+                                if replacement:
+                                    # Superseded - auto-delete the old backup
+                                    try:
+                                        os.remove(plexcached_path)
+                                        superseded_deleted += 1
+                                        continue  # Don't add to orphaned list
+                                    except OSError:
+                                        pass  # If delete fails, treat as orphaned
+
                             try:
                                 size = os.path.getsize(plexcached_path)
                             except OSError:
@@ -419,8 +452,64 @@ class MaintenanceService:
                                 restore_path=original_array_path
                             ))
 
+        if superseded_deleted > 0:
+            import logging
+            logging.info(f"Auto-cleaned {superseded_deleted} superseded .plexcached backup(s) "
+                        "(replaced by Sonarr/Radarr upgrades)")
+
         orphaned.sort(key=lambda f: f.size, reverse=True)
         return orphaned
+
+    def _find_replacement_file(self, original_name: str, cache_directory: str,
+                               cache_files: Set[str]) -> Optional[str]:
+        """Check if a replacement file exists for a .plexcached backup.
+
+        This detects Sonarr/Radarr upgrades where the old file was replaced
+        with a newer/better quality version.
+
+        Args:
+            original_name: Original filename (without .plexcached suffix)
+            cache_directory: The cache directory where the file would be
+            cache_files: Set of all cache files
+
+        Returns:
+            Path to replacement file if found, None otherwise
+        """
+        import re
+
+        # Extract the base pattern (show/movie name + episode info)
+        # TV: "Show Name - S01E02 - Episode Title [quality]..." -> "Show Name - S01E02"
+        # Movie: "Movie Name (2024) - [quality]..." -> "Movie Name (2024)"
+
+        # Try TV show pattern first: "Name - S##E##"
+        tv_match = re.match(r'^(.+ - S\d{2}E\d{2})', original_name)
+        if tv_match:
+            base_pattern = tv_match.group(1)
+        else:
+            # Try movie pattern: "Name (Year)" or just take everything before the first "["
+            movie_match = re.match(r'^(.+?\(\d{4}\))', original_name)
+            if movie_match:
+                base_pattern = movie_match.group(1)
+            else:
+                # Fallback: everything before first " - [" or " ["
+                bracket_match = re.match(r'^(.+?)(?:\s*-\s*\[|\s*\[)', original_name)
+                if bracket_match:
+                    base_pattern = bracket_match.group(1).strip()
+                else:
+                    return None  # Can't determine pattern
+
+        # Look for files in the same cache directory that match the base pattern
+        if not os.path.exists(cache_directory):
+            return None
+
+        for cache_file in cache_files:
+            if cache_file.startswith(cache_directory + os.sep):
+                cache_filename = os.path.basename(cache_file)
+                # Check if it's a different file but same show/episode
+                if cache_filename != original_name and cache_filename.startswith(base_pattern):
+                    return cache_file
+
+        return None
 
     def get_health_summary(self) -> Dict[str, Any]:
         """Get a quick health summary for dashboard widget"""
@@ -473,9 +562,48 @@ class MaintenanceService:
 
     def restore_all_plexcached(self, dry_run: bool = True) -> ActionResult:
         """Restore all orphaned .plexcached files"""
-        orphaned = self._get_orphaned_plexcached()
+        orphaned = self._get_orphaned_plexcached(auto_cleanup_superseded=False)
         paths = [o.plexcached_path for o in orphaned]
         return self.restore_plexcached(paths, dry_run)
+
+    def delete_plexcached(self, paths: List[str], dry_run: bool = True) -> ActionResult:
+        """Delete orphaned .plexcached backup files (e.g., when no longer needed)"""
+        if not paths:
+            return ActionResult(success=False, message="No paths provided")
+
+        affected = 0
+        errors = []
+
+        for plexcached_path in paths:
+            if not plexcached_path.endswith('.plexcached'):
+                errors.append(f"Not a .plexcached file: {os.path.basename(plexcached_path)}")
+                continue
+
+            if dry_run:
+                affected += 1
+            else:
+                try:
+                    if os.path.exists(plexcached_path):
+                        os.remove(plexcached_path)
+                        affected += 1
+                    else:
+                        errors.append(f"{os.path.basename(plexcached_path)}: File not found")
+                except OSError as e:
+                    errors.append(f"{os.path.basename(plexcached_path)}: {str(e)}")
+
+        action = "Would delete" if dry_run else "Deleted"
+        return ActionResult(
+            success=affected > 0,
+            message=f"{action} {affected} backup file(s)",
+            affected_count=affected,
+            errors=errors
+        )
+
+    def delete_all_plexcached(self, dry_run: bool = True) -> ActionResult:
+        """Delete all orphaned .plexcached files"""
+        orphaned = self._get_orphaned_plexcached(auto_cleanup_superseded=False)
+        paths = [o.plexcached_path for o in orphaned]
+        return self.delete_plexcached(paths, dry_run)
 
     def fix_with_backup(self, paths: List[str], dry_run: bool = True) -> ActionResult:
         """Fix unprotected files that have .plexcached backup - delete cache copy, restore backup"""
@@ -522,7 +650,13 @@ class MaintenanceService:
         )
 
     def sync_to_array(self, paths: List[str], dry_run: bool = True) -> ActionResult:
-        """Sync unprotected cache files (without backup) to array"""
+        """Move cache files to array - handles both files with and without backups.
+
+        For each file:
+        - If a .plexcached backup exists: restore it (rename to original), delete cache copy
+        - If a duplicate exists on array: just delete cache copy
+        - If no backup/duplicate: copy to array, verify, then delete cache copy
+        """
         if not paths:
             return ActionResult(success=False, message="No paths provided")
 
@@ -535,29 +669,49 @@ class MaintenanceService:
                 errors.append(f"{os.path.basename(cache_path)}: Unknown path mapping")
                 continue
 
+            # Check for existing backup or duplicate
+            has_backup, backup_path = self._check_plexcached_backup(cache_path)
+            has_dup, _ = self._check_array_duplicate(cache_path)
+
             if dry_run:
                 affected += 1
             else:
                 try:
-                    # Create destination directory if needed
-                    array_dir = os.path.dirname(array_path)
-                    os.makedirs(array_dir, exist_ok=True)
-
-                    # Copy file to array
-                    shutil.copy2(cache_path, array_path)
-
-                    # Verify copy
-                    if os.path.exists(array_path):
-                        cache_size = os.path.getsize(cache_path)
-                        array_size = os.path.getsize(array_path)
-
-                        if cache_size == array_size:
+                    if has_backup and backup_path:
+                        # Restore the .plexcached backup first
+                        original_array_path = backup_path[:-11]  # Remove .plexcached suffix
+                        os.rename(backup_path, original_array_path)
+                        # Delete cache copy
+                        if os.path.exists(cache_path):
                             os.remove(cache_path)
-                            affected += 1
-                        else:
-                            errors.append(f"{os.path.basename(cache_path)}: Size mismatch after copy")
+                        affected += 1
+
+                    elif has_dup:
+                        # Duplicate already exists on array, just delete cache copy
+                        if os.path.exists(cache_path):
+                            os.remove(cache_path)
+                        affected += 1
+
                     else:
-                        errors.append(f"{os.path.basename(cache_path)}: Copy failed")
+                        # No backup/duplicate - copy to array first
+                        array_dir = os.path.dirname(array_path)
+                        os.makedirs(array_dir, exist_ok=True)
+
+                        # Copy file to array
+                        shutil.copy2(cache_path, array_path)
+
+                        # Verify copy
+                        if os.path.exists(array_path):
+                            cache_size = os.path.getsize(cache_path)
+                            array_size = os.path.getsize(array_path)
+
+                            if cache_size == array_size:
+                                os.remove(cache_path)
+                                affected += 1
+                            else:
+                                errors.append(f"{os.path.basename(cache_path)}: Size mismatch after copy")
+                        else:
+                            errors.append(f"{os.path.basename(cache_path)}: Copy failed")
 
                 except OSError as e:
                     errors.append(f"{os.path.basename(cache_path)}: {str(e)}")
@@ -565,7 +719,7 @@ class MaintenanceService:
         if not dry_run:
             self._cleanup_empty_directories()
 
-        action = "Would sync" if dry_run else "Synced"
+        action = "Would move" if dry_run else "Moved"
         return ActionResult(
             success=affected > 0,
             message=f"{action} {affected} file(s) to array",

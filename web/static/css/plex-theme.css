@@ -434,6 +434,26 @@ body {
     background: #d32f2f;
 }
 
+.btn-success {
+    background: var(--success);
+    color: white;
+}
+
+.btn-success:hover {
+    background: #388e3c;
+    transform: translateY(-1px);
+}
+
+.btn-warning {
+    background: var(--warning);
+    color: var(--plex-bg-darker);
+}
+
+.btn-warning:hover {
+    background: #f9a825;
+    transform: translateY(-1px);
+}
+
 .btn-sm {
     padding: 0.375rem 0.75rem;
     font-size: 0.8rem;
@@ -478,6 +498,20 @@ body {
 .card-body {
     padding: 1.25rem;
     overflow-x: auto;
+}
+
+/* Scrollable card body with hidden scrollbar */
+.card-body-scrollable {
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: auto;
+    /* Hide scrollbar for Chrome, Safari, Edge */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+}
+
+.card-body-scrollable::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
 }
 
 .card-footer {
@@ -880,6 +914,62 @@ textarea {
     transform: translateX(18px);
 }
 
+/* Radio Button Groups */
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    padding: 0.5rem 0;
+}
+
+.radio-label input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--plex-orange);
+    cursor: pointer;
+    margin: 0;
+}
+
+.radio-label span:first-of-type {
+    font-weight: 500;
+    min-width: 80px;
+}
+
+/* Checkbox Groups (for notification levels) */
+.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    padding: 0.5rem 0;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--plex-orange);
+    cursor: pointer;
+    margin: 0;
+}
+
+.checkbox-label span:first-of-type {
+    font-weight: 500;
+    min-width: 80px;
+}
+
 /* Library Checkboxes */
 .library-checkboxes {
     display: flex;
@@ -1261,6 +1351,16 @@ textarea {
     color: var(--plex-info);
 }
 
+/* Auto-dismiss animation */
+.alert-auto-dismiss {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.alert-fade-out {
+    opacity: 0;
+    transform: translateY(-10px);
+}
+
 /* ==================== Log Viewer ==================== */
 
 .log-viewer {
@@ -1271,17 +1371,17 @@ textarea {
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
     font-size: 0.8rem;
     line-height: 1.5;
-    max-height: 500px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    max-width: 100%;
+    /* Fixed height viewport with single scroll context for both axes */
+    height: 500px;
+    overflow: auto;
 }
 
 .log-viewer pre {
     margin: 0;
     white-space: pre;
-    overflow-x: auto;
-    max-width: 100%;
+    /* Let content expand naturally - parent handles scrolling */
+    width: max-content;
+    min-width: 100%;
 }
 
 .log-line {
@@ -1422,6 +1522,71 @@ textarea {
 
 .progress-fill.progress-danger {
     background: linear-gradient(90deg, var(--plex-error) 0%, #d32f2f 100%);
+}
+
+/* Cache Limit Section */
+.cache-limit-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.cache-limit-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+}
+
+.cache-limit-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.cache-limit-label {
+    font-size: 0.8rem;
+    color: var(--plex-text-muted);
+}
+
+.cache-limit-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--plex-text);
+}
+
+.cache-limit-bar-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.cache-limit-bar {
+    height: 10px;
+    background: var(--plex-bg-hover);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.cache-limit-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--plex-orange) 0%, var(--plex-orange-dark) 100%);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+.cache-limit-fill.progress-warning {
+    background: linear-gradient(90deg, var(--plex-warning) 0%, #e68900 100%);
+}
+
+.cache-limit-fill.progress-danger {
+    background: linear-gradient(90deg, var(--plex-error) 0%, #d32f2f 100%);
+}
+
+.cache-limit-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: var(--plex-text-muted);
 }
 
 /* Breakdown Grid */
@@ -1923,6 +2088,13 @@ td.user-badges .badge {
     border-top-color: var(--plex-orange);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+}
+
+/* Animate Lucide loader icons */
+.spin-icon,
+[data-lucide="loader"],
+[data-lucide="loader-2"] {
+    animation: spin 1s linear infinite;
 }
 
 /* ==================== Footer ==================== */

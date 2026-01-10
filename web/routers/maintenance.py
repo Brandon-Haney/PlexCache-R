@@ -75,9 +75,11 @@ def _get_cached_audit_results(force_refresh: bool = False):
         _audit_results_cache["results"] = results
         _audit_results_cache["updated_at"] = now
 
-        # Also update the health summary in web cache
+        # Update the health summary in web cache and invalidate dashboard stats
+        # so Dashboard will show fresh health data on next load
         web_cache = get_web_cache_service()
         web_cache.set(CACHE_KEY_MAINTENANCE_HEALTH, service.get_health_summary())
+        web_cache.invalidate(CACHE_KEY_DASHBOARD_STATS)
 
         return results, now
 
@@ -170,6 +172,39 @@ async def restore_plexcached(
     )
 
 
+@router.post("/delete-plexcached", response_class=HTMLResponse)
+async def delete_plexcached(
+    request: Request,
+    paths: List[str] = Form(default=[]),
+    delete_all: bool = Form(default=False),
+    dry_run: bool = Form(default=True)
+):
+    """Delete orphaned .plexcached backups (when no longer needed)"""
+    service = get_maintenance_service()
+
+    if delete_all:
+        result = service.delete_all_plexcached(dry_run=dry_run)
+    else:
+        result = service.delete_plexcached(paths, dry_run=dry_run)
+
+    # Invalidate caches if actual changes were made
+    if not dry_run:
+        _invalidate_caches()
+
+    # Re-run audit to get updated results
+    audit_results = service.run_full_audit()
+
+    return templates.TemplateResponse(
+        "maintenance/partials/action_result.html",
+        {
+            "request": request,
+            "action_result": result,
+            "results": audit_results,
+            "dry_run": dry_run
+        }
+    )
+
+
 @router.post("/fix-with-backup", response_class=HTMLResponse)
 async def fix_with_backup(
     request: Request,
@@ -202,7 +237,7 @@ async def sync_to_array(
     paths: List[str] = Form(default=[]),
     dry_run: bool = Form(default=True)
 ):
-    """Sync files to array"""
+    """Move files to array - restores backups if they exist, copies if not"""
     service = get_maintenance_service()
     result = service.sync_to_array(paths, dry_run=dry_run)
 

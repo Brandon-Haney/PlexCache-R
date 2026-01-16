@@ -1,6 +1,7 @@
 """Maintenance service - cache audit and fix actions"""
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -9,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any
 
-from web.config import PROJECT_ROOT
+from web.config import PROJECT_ROOT, DATA_DIR, CONFIG_DIR, SETTINGS_FILE
 
 
 @dataclass
@@ -115,9 +116,10 @@ class MaintenanceService:
     SUBTITLE_EXTENSIONS = ('.srt', '.sub', '.idx', '.ass', '.ssa', '.vtt', '.smi')
 
     def __init__(self):
-        self.settings_file = PROJECT_ROOT / "plexcache_settings.json"
-        self.exclude_file = PROJECT_ROOT / "plexcache_mover_files_to_exclude.txt"
-        self.timestamps_file = PROJECT_ROOT / "data" / "timestamps.json"
+        # Use CONFIG_DIR and DATA_DIR for Docker compatibility
+        self.settings_file = SETTINGS_FILE
+        self.exclude_file = CONFIG_DIR / "plexcache_mover_files_to_exclude.txt"
+        self.timestamps_file = DATA_DIR / "timestamps.json"
         self._cache_dirs: List[str] = []
         self._array_dirs: List[str] = []
         self._settings: Dict = {}
@@ -136,6 +138,57 @@ class MaintenanceService:
             return self._settings
         except (json.JSONDecodeError, IOError):
             return {}
+
+    def _translate_host_to_container_path(self, path: str) -> str:
+        """Translate host cache path back to container path.
+
+        The exclude file contains host paths (for Unraid mover), but cache_files
+        uses container paths. This translates host paths back to container paths
+        for accurate comparison.
+        """
+        settings = self._load_settings()
+        path_mappings = settings.get('path_mappings', [])
+
+        for mapping in path_mappings:
+            host_cache_path = mapping.get('host_cache_path', '')
+            cache_path = mapping.get('cache_path', '')
+
+            if not host_cache_path or not cache_path:
+                continue
+            if host_cache_path == cache_path:
+                continue  # No translation needed
+
+            host_prefix = host_cache_path.rstrip('/')
+            if path.startswith(host_prefix):
+                container_prefix = cache_path.rstrip('/')
+                return path.replace(host_prefix, container_prefix, 1)
+
+        return path
+
+    def _translate_container_to_host_path(self, path: str) -> str:
+        """Translate container cache path to host path for exclude file.
+
+        When writing to the exclude file, paths must be host paths so the
+        Unraid mover can understand them.
+        """
+        settings = self._load_settings()
+        path_mappings = settings.get('path_mappings', [])
+
+        for mapping in path_mappings:
+            host_cache_path = mapping.get('host_cache_path', '')
+            cache_path = mapping.get('cache_path', '')
+
+            if not host_cache_path or not cache_path:
+                continue
+            if host_cache_path == cache_path:
+                continue  # No translation needed
+
+            container_prefix = cache_path.rstrip('/')
+            if path.startswith(container_prefix):
+                host_prefix = host_cache_path.rstrip('/')
+                return path.replace(container_prefix, host_prefix, 1)
+
+        return path
 
     def _get_paths(self) -> tuple:
         """Get cache and array directory paths from settings"""
@@ -211,7 +264,7 @@ class MaintenanceService:
         return cache_files
 
     def get_exclude_files(self) -> Set[str]:
-        """Get all files in exclude list"""
+        """Get all files in exclude list (translated to container paths for comparison)"""
         exclude_files = set()
         if self.exclude_file.exists():
             try:
@@ -219,7 +272,9 @@ class MaintenanceService:
                     for line in f:
                         line = line.strip()
                         if line:
-                            exclude_files.add(line)
+                            # Translate host paths back to container paths for comparison
+                            container_path = self._translate_host_to_container_path(line)
+                            exclude_files.add(container_path)
             except IOError:
                 pass
         return exclude_files
@@ -742,7 +797,9 @@ class MaintenanceService:
         try:
             with open(self.exclude_file, 'a', encoding='utf-8') as f:
                 for path in paths:
-                    f.write(path + '\n')
+                    # Translate container paths to host paths for Unraid mover
+                    host_path = self._translate_container_to_host_path(path)
+                    f.write(host_path + '\n')
 
             return ActionResult(
                 success=True,
@@ -758,57 +815,80 @@ class MaintenanceService:
 
     def protect_with_backup(self, paths: List[str], dry_run: bool = True) -> ActionResult:
         """Protect cache files by creating .plexcached backup on array and adding to exclude list"""
+        logging.info(f"protect_with_backup called with {len(paths)} paths, dry_run={dry_run}")
+
         if not paths:
+            logging.warning("protect_with_backup: No paths provided")
             return ActionResult(success=False, message="No paths provided")
 
         affected = 0
         errors = []
 
-        for cache_path in paths:
+        for i, cache_path in enumerate(paths):
+            logging.debug(f"Processing path {i+1}/{len(paths)}: {cache_path}")
+
             # Get the array path equivalent
             array_path = self._cache_to_array_path(cache_path)
             if not array_path:
+                logging.warning(f"Could not convert cache path to array path: {cache_path}")
                 errors.append(f"{os.path.basename(cache_path)}: Unknown path mapping")
                 continue
 
             plexcached_path = array_path + ".plexcached"
+            logging.debug(f"Array path: {array_path}, plexcached_path: {plexcached_path}")
 
             if dry_run:
                 affected += 1
             else:
                 try:
-                    # Create destination directory if needed
-                    array_dir = os.path.dirname(array_path)
-                    os.makedirs(array_dir, exist_ok=True)
+                    # Check if backup already exists
+                    backup_exists = os.path.exists(plexcached_path)
 
-                    # Copy file to array as .plexcached backup
-                    shutil.copy2(cache_path, plexcached_path)
-
-                    # Verify copy
-                    if os.path.exists(plexcached_path):
-                        cache_size = os.path.getsize(cache_path)
-                        backup_size = os.path.getsize(plexcached_path)
-
-                        if cache_size == backup_size:
-                            # Add to exclude list
-                            with open(self.exclude_file, 'a', encoding='utf-8') as f:
-                                f.write(cache_path + '\n')
-
-                            # Add to timestamps.json
-                            self._add_to_timestamps(cache_path)
-
-                            affected += 1
-                        else:
-                            # Size mismatch - remove failed backup
-                            os.remove(plexcached_path)
-                            errors.append(f"{os.path.basename(cache_path)}: Copy verification failed")
+                    if backup_exists:
+                        # Backup already exists - just add to exclude list and timestamps
+                        logging.info(f"Backup already exists for {os.path.basename(cache_path)}, adding to exclude list")
                     else:
-                        errors.append(f"{os.path.basename(cache_path)}: Backup not created")
+                        # Need to create backup - copy file to array
+                        array_dir = os.path.dirname(array_path)
+                        os.makedirs(array_dir, exist_ok=True)
+
+                        cache_size = os.path.getsize(cache_path) if os.path.exists(cache_path) else 0
+                        logging.info(f"Copying {os.path.basename(cache_path)} ({cache_size / (1024**3):.2f} GB) to array...")
+
+                        shutil.copy2(cache_path, plexcached_path)
+
+                        # Verify copy
+                        if os.path.exists(plexcached_path):
+                            backup_size = os.path.getsize(plexcached_path)
+                            if cache_size != backup_size:
+                                os.remove(plexcached_path)
+                                logging.error(f"Copy verification failed for {os.path.basename(cache_path)}: {cache_size} != {backup_size}")
+                                errors.append(f"{os.path.basename(cache_path)}: Copy verification failed")
+                                continue
+                        else:
+                            logging.error(f"Backup not created for {os.path.basename(cache_path)}")
+                            errors.append(f"{os.path.basename(cache_path)}: Backup not created")
+                            continue
+
+                    # Add to exclude list (translate to host path for Unraid mover)
+                    host_path = self._translate_container_to_host_path(cache_path)
+                    with open(self.exclude_file, 'a', encoding='utf-8') as f:
+                        f.write(host_path + '\n')
+
+                    # Add to timestamps.json
+                    self._add_to_timestamps(cache_path)
+
+                    logging.info(f"Protected: {os.path.basename(cache_path)}")
+                    affected += 1
 
                 except (IOError, OSError) as e:
+                    logging.exception(f"Error protecting {os.path.basename(cache_path)}: {e}")
                     errors.append(f"{os.path.basename(cache_path)}: {str(e)}")
 
         action = "Would protect" if dry_run else "Protected"
+        logging.info(f"protect_with_backup complete: {action} {affected} file(s), {len(errors)} errors")
+        if errors:
+            logging.warning(f"protect_with_backup errors: {errors}")
         return ActionResult(
             success=affected > 0 or (dry_run and not errors),
             message=f"{action} {affected} file(s) with array backup",
@@ -855,7 +935,9 @@ class MaintenanceService:
             valid_entries = exclude_files & cache_files
             with open(self.exclude_file, 'w', encoding='utf-8') as f:
                 for path in sorted(valid_entries):
-                    f.write(path + '\n')
+                    # Translate container paths back to host paths for Unraid mover
+                    host_path = self._translate_container_to_host_path(path)
+                    f.write(host_path + '\n')
 
             return ActionResult(
                 success=True,
@@ -1015,7 +1097,10 @@ class MaintenanceService:
             with open(self.exclude_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
-            new_lines = [line for line in lines if line.strip() != cache_path]
+            # Translate container path to host path for comparison
+            # (exclude file contains host paths for Unraid mover)
+            host_path = self._translate_container_to_host_path(cache_path)
+            new_lines = [line for line in lines if line.strip() != host_path]
 
             with open(self.exclude_file, 'w', encoding='utf-8') as f:
                 f.writelines(new_lines)

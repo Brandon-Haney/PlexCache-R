@@ -166,13 +166,67 @@ class SystemDetector:
     def _detect_docker(self) -> bool:
         """Detect if running inside a Docker container."""
         return os.path.exists('/.dockerenv')
-    
+
+    def validate_docker_mounts(self, paths: list) -> list:
+        """
+        Validate that paths are actual mount points in Docker.
+
+        In Docker, if a volume mount fails (e.g., source doesn't exist,
+        trailing space in path), the path will exist as an empty directory
+        inside the container rather than a mount point. This can cause
+        massive data to be written inside the container.
+
+        Args:
+            paths: List of paths to validate (e.g., ['/mnt/cache', '/mnt/user0'])
+
+        Returns:
+            List of warning messages for any issues found
+        """
+        warnings = []
+
+        if not self.is_docker:
+            return warnings
+
+        for path in paths:
+            if not path:
+                continue
+
+            # Normalize path (remove trailing slashes for consistent checking)
+            path = path.rstrip('/')
+
+            if not os.path.exists(path):
+                # Path doesn't exist - might be OK if not used
+                continue
+
+            # Check if it's a mount point
+            if not os.path.ismount(path):
+                # Not a mount point - could be a directory inside container
+                # Check if it's suspiciously small (container rootfs is typically small)
+                try:
+                    stat = os.statvfs(path)
+                    total_gb = (stat.f_blocks * stat.f_frsize) / (1024**3)
+
+                    # If the filesystem is very small (< 100GB), it's likely container rootfs
+                    if total_gb < 100:
+                        warnings.append(
+                            f"WARNING: {path} may not be properly mounted! "
+                            f"Filesystem is only {total_gb:.1f}GB. "
+                            f"Check your Docker volume configuration."
+                        )
+                except OSError:
+                    pass
+
+        return warnings
+
 class FileUtils:
     """Utility functions for file operations."""
-    
-    def __init__(self, is_linux: bool, permissions: int = 0o777):
+
+    def __init__(self, is_linux: bool, permissions: int = 0o777, is_docker: bool = False):
         self.is_linux = is_linux
         self.permissions = permissions
+        self.is_docker = is_docker
+        if is_docker:
+            logging.info("Docker detected - skipping chown/chmod operations (permissions handled by container)")
     
     def check_path_exists(self, path: str) -> None:
         """Check if path exists, is a directory, and is writable."""
@@ -243,9 +297,27 @@ class FileUtils:
         
         return size, unit
     
-    def copy_file_with_permissions(self, src: str, dest: str, verbose: bool = False) -> int:
-        """Copy a file preserving original ownership and permissions (Linux only)."""
-        logging.debug(f"Copying file from {src} to {dest}")
+    def copy_file_with_permissions(
+        self,
+        src: str,
+        dest: str,
+        verbose: bool = False,
+        display_src: str = None,
+        display_dest: str = None
+    ) -> int:
+        """Copy a file preserving original ownership and permissions (Linux only).
+
+        Args:
+            src: Source file path
+            dest: Destination file path
+            verbose: If True, log detailed ownership info
+            display_src: Optional path to show in logs instead of src (for Docker host paths)
+            display_dest: Optional path to show in logs instead of dest (for Docker host paths)
+        """
+        # Use display paths for logging if provided (Docker shows host paths)
+        log_src = display_src or src
+        log_dest = display_dest or dest
+        logging.debug(f"Copying file from {log_src} to {log_dest}")
 
         try:
             if self.is_linux:
@@ -253,38 +325,45 @@ class FileUtils:
                 stat_info = os.stat(src)
                 src_uid = stat_info.st_uid
                 src_gid = stat_info.st_gid
-                src_mode = stat_info.st_mode
 
                 # Copy the file (preserves metadata like timestamps)
                 shutil.copy2(src, dest)
 
-                # Restore original ownership (shutil.copy2 doesn't preserve uid/gid)
-                os.chown(dest, src_uid, src_gid)
-                original_umask = os.umask(0)
-                os.chmod(dest, self.permissions)
-                os.umask(original_umask)
+                # Skip chown/chmod in Docker - container handles permissions via entrypoint
+                if not self.is_docker:
+                    original_umask = os.umask(0)
+                    try:
+                        os.chown(dest, src_uid, src_gid)
+                    except (PermissionError, OSError) as e:
+                        logging.debug(f"Could not set file ownership (filesystem may not support it): {e}")
+
+                    try:
+                        os.chmod(dest, self.permissions)
+                    except (PermissionError, OSError) as e:
+                        logging.debug(f"Could not set file permissions (filesystem may not support it): {e}")
+                    os.umask(original_umask)
 
                 if verbose:
                     # Log ownership details for debugging
                     dest_stat = os.stat(dest)
-                    logging.debug(f"File copied: {src} -> {dest}")
+                    logging.debug(f"File copied: {log_src} -> {log_dest}")
                     logging.debug(f"  Preserved ownership: uid={dest_stat.st_uid}, gid={dest_stat.st_gid}")
                     logging.debug(f"  Mode: {oct(dest_stat.st_mode)}")
                 else:
-                    logging.debug(f"File copied with permissions preserved: {dest}")
+                    logging.debug(f"File copied with permissions preserved: {log_dest}")
             else:  # Windows logic
                 shutil.copy2(src, dest)
-                logging.debug(f"File copied (Windows): {src} -> {dest}")
+                logging.debug(f"File copied (Windows): {log_src} -> {log_dest}")
 
             return 0
         except (FileNotFoundError, PermissionError, Exception) as e:
-            logging.error(f"Error copying file from {src} to {dest}: {str(e)}")
+            logging.error(f"Error copying file from {log_src} to {log_dest}: {str(e)}")
             raise RuntimeError(f"Error copying file: {str(e)}")
 
     def create_directory_with_permissions(self, path: str, src_file_for_permissions: str) -> None:
         """Create directory with proper permissions."""
         logging.debug(f"Creating directory with permissions: {path}")
-        
+
         if not os.path.exists(path):
             if self.is_linux:
                 # Get the permissions of the source file
@@ -293,8 +372,19 @@ class FileUtils:
                 gid = stat_info.st_gid
                 original_umask = os.umask(0)
                 os.makedirs(path, exist_ok=True)
-                os.chown(path, uid, gid)
-                os.chmod(path, self.permissions)
+
+                # Skip chown/chmod in Docker - container handles permissions via entrypoint
+                if not self.is_docker:
+                    try:
+                        os.chown(path, uid, gid)
+                    except (PermissionError, OSError) as e:
+                        logging.debug(f"Could not set directory ownership (filesystem may not support it): {e}")
+
+                    try:
+                        os.chmod(path, self.permissions)
+                    except (PermissionError, OSError) as e:
+                        logging.debug(f"Could not set directory permissions (filesystem may not support it): {e}")
+
                 os.umask(original_umask)
                 logging.debug(f"Directory created with permissions (Linux): {path}")
             else:  # Windows platform

@@ -24,8 +24,9 @@ async def run_operation(
 
     runner = get_operation_runner()
 
-    # Check if HTMX request
+    # Check if HTMX request and what target
     is_htmx = request.headers.get("HX-Request") == "true"
+    hx_target = request.headers.get("HX-Target", "")
 
     # Try to start the operation
     if runner.is_running:
@@ -46,6 +47,60 @@ async def run_operation(
 
     if is_htmx:
         status = runner.get_status_dict()
+        # Use global banner template if targeting the global banner
+        if hx_target == "global-operation-banner":
+            return templates.TemplateResponse(
+                "components/global_operation_banner.html",
+                {
+                    "request": request,
+                    "status": status
+                }
+            )
+        # Default to original operation_status template
+        return templates.TemplateResponse(
+            "components/operation_status.html",
+            {
+                "request": request,
+                "status": status,
+                "message": message,
+                "success": success
+            }
+        )
+
+    return JSONResponse({
+        "success": success,
+        "message": message,
+        "status": runner.get_status_dict()
+    })
+
+
+@router.post("/stop")
+async def stop_operation(request: Request):
+    """Stop the current operation"""
+    runner = get_operation_runner()
+
+    is_htmx = request.headers.get("HX-Request") == "true"
+    hx_target = request.headers.get("HX-Target", "")
+
+    if runner.is_running:
+        success = runner.stop_operation()
+        message = "Stop requested - operation will stop after current file" if success else "Failed to stop operation"
+    else:
+        success = False
+        message = "No operation is currently running"
+
+    if is_htmx:
+        status = runner.get_status_dict()
+        # Use global banner template if targeting the global banner
+        if hx_target == "global-operation-banner":
+            return templates.TemplateResponse(
+                "components/global_operation_banner.html",
+                {
+                    "request": request,
+                    "status": status
+                }
+            )
+        # Default to original operation_status template
         return templates.TemplateResponse(
             "components/operation_status.html",
             {

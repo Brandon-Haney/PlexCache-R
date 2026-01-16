@@ -544,25 +544,11 @@ class PlexManager:
                 except Exception as e:
                     logging.debug(f"GUID lookup error for {guid}: {e}")
 
-        # Fallback to title search
-        results = self.plex.search(title)
-        if not results:
-            return None
-
-        # If expected_type specified, find first result matching that type
-        if expected_type:
-            for r in results:
-                if r.TYPE == expected_type:
-                    # Also verify section if valid_sections specified
-                    if valid_sections and r.librarySectionID not in valid_sections:
-                        continue
-                    logging.debug(f"Title search matched '{r.title}' ({r.TYPE}) for '{title}'")
-                    return r
-            # No match with expected type - don't return wrong type
-            logging.debug(f"Title search found results for '{title}' but none matched expected type '{expected_type}'")
-            return None
-
-        return results[0]
+        # No GUID match found - item is not in library
+        # Note: We intentionally do NOT fall back to title search as it can return
+        # incorrect matches (e.g., "Weapons" matching to "Mary Poppins")
+        logging.debug(f"No GUID match found for '{title}' (guid={guid}) — item not in library")
+        return None
     
     def get_active_sessions(self) -> List:
         """Get active sessions from Plex."""
@@ -976,7 +962,7 @@ class PlexManager:
 
         # --- RSS feed processing ---
         if rss_url:
-            yield from self._process_rss_watchlist(rss_url, current_username, filtered_sections, watchlist_episodes)
+            yield from self._process_rss_watchlist(rss_url, current_username, filtered_sections, watchlist_episodes, skip_watchlist)
             return
 
         # --- Local Plex watchlist processing ---
@@ -991,7 +977,21 @@ class PlexManager:
                     watchlisted_at = getattr(user_state, 'watchlistedAt', None)
                 except Exception as e:
                     logging.debug(f"Could not get userState for {item.title}: {e}")
-                file = self.search_plex(item.title)
+
+                # Extract GUID for accurate matching (prefer IMDB, then TVDB)
+                guid = None
+                item_guids = getattr(item, 'guids', [])
+                for g in item_guids:
+                    gid = getattr(g, 'id', str(g))
+                    if gid.startswith('imdb://') or gid.startswith('tvdb://'):
+                        guid = gid
+                        break
+
+                # Determine expected type from watchlist item
+                expected_type = getattr(item, 'type', None)
+
+                file = self.search_plex(item.title, guid=guid, expected_type=expected_type,
+                                       valid_sections=filtered_sections)
                 if file and (not filtered_sections or file.librarySectionID in filtered_sections):
                     try:
                         if file.TYPE == 'show':
@@ -1009,12 +1009,20 @@ class PlexManager:
             self.mark_watchlist_incomplete()
 
     def _process_rss_watchlist(self, rss_url: str, current_username: str,
-                                filtered_sections: List[int], watchlist_episodes: int) -> Generator[Tuple[str, str, Optional[datetime]], None, None]:
-        """Process RSS feed items and yield matching media files."""
+                                filtered_sections: List[int], watchlist_episodes: int,
+                                skip_watchlist: List[str] = None) -> Generator[Tuple[str, str, Optional[datetime]], None, None]:
+        """Process RSS feed items and yield matching media files.
+
+        Args:
+            skip_watchlist: List of usernames to skip (filters RSS items by who added them)
+        """
+        if skip_watchlist is None:
+            skip_watchlist = []
         rss_items = self._fetch_rss_titles(rss_url)
         logging.debug(f"RSS feed contains {len(rss_items)} items")
         unknown_user_ids = set()
         rss_not_found = []
+        rss_skipped_users = {}  # username -> count of skipped items
 
         for title, category, pub_date, author_id, guid in rss_items:
             # Look up username from author ID
@@ -1029,6 +1037,12 @@ class PlexManager:
                     unknown_user_ids.add(author_id)
             else:
                 rss_username = "Friends (RSS)"
+
+            # Skip items from users in the skip list
+            if skip_watchlist and rss_username in skip_watchlist:
+                logging.debug(f"RSS: Skipping '{title}' — added by {rss_username} (in skip list)")
+                rss_skipped_users[rss_username] = rss_skipped_users.get(rss_username, 0) + 1
+                continue
 
             cleaned_title = self.clean_rss_title(title)
             file = self.search_plex(cleaned_title, guid=guid, expected_type=category,
@@ -1054,6 +1068,12 @@ class PlexManager:
                 logging.info(f"RSS: Skipped {len(rss_not_found)} items not in library")
             else:
                 logging.info(f"RSS: Skipped {len(rss_not_found)} items not in library (use --verbose for details)")
+
+        # Log summary of skipped users
+        if rss_skipped_users:
+            total_skipped = sum(rss_skipped_users.values())
+            user_summary = ", ".join(f"{user}: {count}" for user, count in sorted(rss_skipped_users.items()))
+            logging.info(f"RSS: Skipped {total_skipped} items from disabled users ({user_summary})")
 
         if unknown_user_ids:
             logging.debug(f"[PLEX API] {len(unknown_user_ids)} unknown user ID(s) in RSS feed: {', '.join(sorted(unknown_user_ids))}. Run 'python3 plexcache_setup.py' and refresh users to resolve.")

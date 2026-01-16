@@ -55,7 +55,22 @@
     <!-- Sidebar Overlay -->
     <div class="sidebar-overlay" onclick="closeSidebar()"></div>
 
+    <!-- Global Operation Status Banner - floating overlay on all pages -->
+    <div id="global-operation-banner"
+         hx-get="/api/operation-banner"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+    </div>
+
     <div class="app-container">
+        <!-- Top right controls (theme toggle) - fixed position -->
+        <div class="top-controls">
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <i data-lucide="sun" class="icon-sun"></i>
+                <i data-lucide="moon" class="icon-moon"></i>
+            </button>
+        </div>
+
         <!-- Sidebar -->
         <nav class="sidebar">
             <div class="sidebar-brand">
@@ -109,14 +124,6 @@
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Top right controls (theme toggle) -->
-            <div class="top-controls">
-                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-                    <i data-lucide="sun" class="icon-sun"></i>
-                    <i data-lucide="moon" class="icon-moon"></i>
-                </button>
-            </div>
-
             <div class="content-wrapper">
                 <!-- Alert container for toast notifications -->
                 <div id="alert-container"></div>
@@ -192,6 +199,7 @@
             const appContainer = document.querySelector('.app-container');
             const isCollapsed = sidebar.classList.toggle('collapsed');
             appContainer.classList.toggle('sidebar-collapsed', isCollapsed);
+            document.body.classList.toggle('sidebar-collapsed', isCollapsed);
 
             // Persist state
             localStorage.setItem('sidebarCollapsed', isCollapsed);
@@ -212,6 +220,7 @@
                 if (sidebar && appContainer) {
                     sidebar.classList.add('collapsed');
                     appContainer.classList.add('sidebar-collapsed');
+                    document.body.classList.add('sidebar-collapsed');
                 }
                 // Remove the init class since we've applied the proper classes
                 document.documentElement.classList.remove('sidebar-collapsed-init');

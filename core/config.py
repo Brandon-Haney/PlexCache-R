@@ -51,7 +51,11 @@ class PathMapping:
         name: Human-readable identifier for logging/diagnostics
         plex_path: Path as Plex sees it (container mount point)
         real_path: Actual filesystem path where PlexCache runs
-        cache_path: Cache destination path (None if not cacheable)
+        cache_path: Cache destination path (None if not cacheable) - container view
+        host_cache_path: Host cache path for Docker (None = same as cache_path)
+            When running in Docker with remapped volumes, the container sees
+            /mnt/cache but the host (Unraid mover) sees /mnt/cache_downloads.
+            This field stores the host-side path for the exclude file.
         cacheable: Whether files from this mapping can be moved to cache
         enabled: Toggle mapping on/off without deleting config
     """
@@ -59,6 +63,7 @@ class PathMapping:
     plex_path: str = ""
     real_path: str = ""
     cache_path: Optional[str] = None
+    host_cache_path: Optional[str] = None  # For Docker: host-side cache path
     cacheable: bool = True
     enabled: bool = True
 
@@ -150,6 +155,16 @@ class CacheConfig:
     # Only evict items with priority score below this threshold (0-100)
     eviction_min_priority: int = 60
 
+    # .plexcached backup files: when moving files to cache, rename array file to .plexcached
+    # This provides a backup on the array in case the cache drive fails.
+    # Disable this if you use Mover Tuning with cache:prefer shares
+    # WARNING: If disabled, cached files CANNOT be recovered if the cache drive fails
+    create_plexcached_backups: bool = True
+
+    # Hard-linked files handling (e.g., files linked to seed/downloads folder for torrenting)
+    # "skip" - Don't cache hard-linked files; they'll be cached after seeding completes
+    # "move" - Cache hard-linked files; seed copy preserved via remaining hard link
+    hardlinked_files: str = "skip"
 
 
 @dataclass
@@ -356,6 +371,16 @@ class ConfigManager:
             logging.warning(f"Invalid eviction_min_priority '{self.cache.eviction_min_priority}', using 60")
             self.cache.eviction_min_priority = 60
 
+        # Load .plexcached backup setting (default True for safety)
+        self.cache.create_plexcached_backups = self.settings_data.get('create_plexcached_backups', True)
+
+        # Load hard-linked files handling setting (default "skip" for safety)
+        hardlinked_files = self.settings_data.get('hardlinked_files', 'skip')
+        if hardlinked_files not in ('skip', 'move'):
+            logging.warning(f"Invalid hardlinked_files '{hardlinked_files}', using 'skip'")
+            hardlinked_files = 'skip'
+        self.cache.hardlinked_files = hardlinked_files
+
     def _load_path_config(self) -> None:
         """Load path-related configuration."""
         # Load cache_dir (always required)
@@ -378,16 +403,23 @@ class ConfigManager:
         # Load multi-path mappings (new format)
         self.paths.path_mappings = []
         for mapping_data in self.settings_data.get('path_mappings', []):
+            cache_path = self._add_trailing_slashes(mapping_data['cache_path']) if mapping_data.get('cache_path') else None
+            host_cache_path = self._add_trailing_slashes(mapping_data['host_cache_path']) if mapping_data.get('host_cache_path') else None
             mapping = PathMapping(
                 name=mapping_data.get('name', 'Unnamed'),
                 plex_path=self._add_trailing_slashes(mapping_data.get('plex_path', '')),
                 real_path=self._add_trailing_slashes(mapping_data.get('real_path', '')),
-                cache_path=self._add_trailing_slashes(mapping_data['cache_path']) if mapping_data.get('cache_path') else None,
+                cache_path=cache_path,
+                host_cache_path=host_cache_path,
                 cacheable=mapping_data.get('cacheable', True),
                 enabled=mapping_data.get('enabled', True)
             )
             self.paths.path_mappings.append(mapping)
-            logging.debug(f"Loaded path mapping: {mapping.name} ({mapping.plex_path} -> {mapping.real_path})")
+            if host_cache_path and host_cache_path != cache_path:
+                logging.debug(f"Loaded path mapping: {mapping.name} ({mapping.plex_path} -> {mapping.real_path})")
+                logging.debug(f"  Cache: {mapping.cache_path} -> Host: {mapping.host_cache_path}")
+            else:
+                logging.debug(f"Loaded path mapping: {mapping.name} ({mapping.plex_path} -> {mapping.real_path})")
     
     def _load_performance_config(self) -> None:
         """Load performance-related configuration."""
@@ -575,6 +607,7 @@ class ConfigManager:
                         'plex_path': m.plex_path,
                         'real_path': m.real_path,
                         'cache_path': m.cache_path,
+                        'host_cache_path': m.host_cache_path,
                         'cacheable': m.cacheable,
                         'enabled': m.enabled
                     }

@@ -10,17 +10,7 @@
         <p class="text-muted mb-2">Configure how Plex paths map to your filesystem and cache drive.</p>
 
         <div id="path-mappings">
-            {% if mappings %}
-                {% for mapping in mappings %}
-                {% set index = loop.index0 %}
-                {% include "settings/partials/path_mapping_card.html" %}
-                {% endfor %}
-            {% else %}
-                <div class="alert alert-info" id="no-mappings-alert">
-                    <i data-lucide="info"></i>
-                    No path mappings configured. Run setup wizard or add mappings below.
-                </div>
-            {% endif %}
+            {% include "settings/partials/path_mappings_list.html" %}
         </div>
 
         <script>
@@ -70,6 +60,17 @@
                         <div class="form-hint">Cache drive path (optional)</div>
                     </div>
                 </div>
+
+                {% if is_docker %}
+                <div class="form-group">
+                    <label for="new_host_cache_path" style="color: var(--plex-orange);">Host Cache Path (Docker)</label>
+                    <input type="text" id="new_host_cache_path" name="host_cache_path" placeholder="/mnt/cache_downloads/media/tv">
+                    <div class="form-hint">
+                        The actual host path Unraid sees. Only needed if Docker remaps your cache path
+                        (e.g., <code>/mnt/cache_downloads:/mnt/cache</code>).
+                    </div>
+                </div>
+                {% endif %}
 
                 <div class="flex gap-2 mb-2">
                     <label class="switch">

@@ -32,8 +32,8 @@
                 <div class="form-group">
                     <label for="watchlist_retention_days">Watchlist Retention (days)</label>
                     <input type="number" id="watchlist_retention_days" name="watchlist_retention_days"
-                           value="{{ settings.watchlist_retention_days | default(14) }}" min="1" max="90" step="0.5">
-                    <div class="form-hint">Auto-expire watchlist items after this period</div>
+                           value="{{ settings.watchlist_retention_days | default(14) }}" min="0" max="365" step="0.5">
+                    <div class="form-hint">Auto-expire watchlist items after this period (0 = never expire)</div>
                 </div>
             </div>
 
@@ -67,12 +67,30 @@
                 </label>
             </div>
 
+            <div class="form-group">
+                <label class="switch">
+                    <input type="checkbox" name="create_plexcached_backups"
+                           {% if settings.create_plexcached_backups | default(true) %}checked{% endif %}>
+                    <span>Create .plexcached Backup Files</span>
+                </label>
+                <div class="form-hint">When moving files to cache, keep backup on array (allows recovery if cache fails)</div>
+            </div>
+
+            <div class="form-group">
+                <label for="hardlinked_files">Hardlinked Files Handling</label>
+                <select id="hardlinked_files" name="hardlinked_files">
+                    <option value="skip" {% if settings.hardlinked_files == 'skip' or not settings.hardlinked_files %}selected{% endif %}>Skip (preserve for seeders)</option>
+                    <option value="move" {% if settings.hardlinked_files == 'move' %}selected{% endif %}>Move (break hardlinks)</option>
+                </select>
+                <div class="form-hint">Files with multiple hardlinks (e.g., seeding torrents). Skip preserves links, Move copies the file.</div>
+            </div>
+
             <div class="grid grid-2">
                 <div class="form-group">
                     <label for="cache_retention_hours">Cache Retention (hours)</label>
                     <input type="number" id="cache_retention_hours" name="cache_retention_hours"
-                           value="{{ settings.cache_retention_hours | default(12) }}" min="1" max="168">
-                    <div class="form-hint">Keep files cached at least this long</div>
+                           value="{{ settings.cache_retention_hours | default(12) }}" min="0" max="720">
+                    <div class="form-hint">Keep files cached at least this long (0 = no minimum)</div>
                 </div>
 
                 <div class="form-group">
@@ -137,6 +155,38 @@
                     <option value="168" {% if settings.activity_retention_hours == 168 %}selected{% endif %}>7 days</option>
                 </select>
                 <div class="form-hint">How long to keep Recent Activity entries on the Dashboard</div>
+            </div>
+
+            <hr style="border-color: var(--plex-border); margin: 1.5rem 0;">
+
+            <h3 style="font-size: 1rem; color: var(--plex-orange); margin-bottom: 1rem;">
+                <i data-lucide="sliders" style="width: 18px; height: 18px; vertical-align: middle;"></i>
+                Advanced
+            </h3>
+
+            <div class="form-group">
+                <label class="switch">
+                    <input type="checkbox" name="exit_if_active_session"
+                           {% if settings.exit_if_active_session %}checked{% endif %}>
+                    <span>Skip Run if Plex Has Active Playback</span>
+                </label>
+                <div class="form-hint">Exit without processing if someone is currently watching. Prevents moving files during playback.</div>
+            </div>
+
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="max_concurrent_moves_cache">Concurrent Moves to Cache</label>
+                    <input type="number" id="max_concurrent_moves_cache" name="max_concurrent_moves_cache"
+                           value="{{ settings.max_concurrent_moves_cache | default(5) }}" min="1" max="10">
+                    <div class="form-hint">Max parallel file operations when moving TO cache (default: 5)</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="max_concurrent_moves_array">Concurrent Moves to Array</label>
+                    <input type="number" id="max_concurrent_moves_array" name="max_concurrent_moves_array"
+                           value="{{ settings.max_concurrent_moves_array | default(2) }}" min="1" max="10">
+                    <div class="form-hint">Max parallel file operations when moving TO array (default: 2)</div>
+                </div>
             </div>
 
             <div class="form-group mb-0">

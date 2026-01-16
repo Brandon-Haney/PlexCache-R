@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
-from web.config import PROJECT_ROOT
+from web.config import PROJECT_ROOT, DATA_DIR, CONFIG_DIR, SETTINGS_FILE
 
 
 @dataclass
@@ -31,11 +31,12 @@ class CacheService:
     """Service for reading cache data and calculating priorities"""
 
     def __init__(self):
-        self.exclude_file = PROJECT_ROOT / "plexcache_mover_files_to_exclude.txt"
-        self.timestamps_file = PROJECT_ROOT / "data" / "timestamps.json"
-        self.ondeck_file = PROJECT_ROOT / "data" / "ondeck_tracker.json"
-        self.watchlist_file = PROJECT_ROOT / "data" / "watchlist_tracker.json"
-        self.settings_file = PROJECT_ROOT / "plexcache_settings.json"
+        # Use CONFIG_DIR for Docker compatibility (/config in Docker, project root otherwise)
+        self.exclude_file = CONFIG_DIR / "plexcache_mover_files_to_exclude.txt"
+        self.timestamps_file = DATA_DIR / "timestamps.json"
+        self.ondeck_file = DATA_DIR / "ondeck_tracker.json"
+        self.watchlist_file = DATA_DIR / "watchlist_tracker.json"
+        self.settings_file = SETTINGS_FILE
 
     def _load_json_file(self, path: Path) -> Dict:
         """Load a JSON file, returning empty dict if not found"""
@@ -50,6 +51,50 @@ class CacheService:
     def _load_settings(self) -> Dict:
         """Load settings file"""
         return self._load_json_file(self.settings_file)
+
+    def _get_cache_dir(self, settings: Dict = None) -> str:
+        """Get the cache directory, preferring path_mappings over cache_dir setting.
+
+        This ensures consistency between what the UI shows and what the script uses.
+        The script uses path_mappings[].cache_path for actual file operations, so
+        disk usage stats should use the same path.
+        """
+        if settings is None:
+            settings = self._load_settings()
+
+        # First check path_mappings for an enabled, cacheable mapping
+        path_mappings = settings.get("path_mappings", [])
+        for mapping in path_mappings:
+            if mapping.get("enabled", True) and mapping.get("cacheable") and mapping.get("cache_path"):
+                return mapping.get("cache_path")
+
+        # Fall back to cache_dir setting
+        return settings.get("cache_dir", "")
+
+    def _translate_container_to_host_path(self, path: str) -> str:
+        """Translate container cache path to host path for exclude file.
+
+        When writing to the exclude file, paths must be host paths so the
+        Unraid mover can understand them.
+        """
+        settings = self._load_settings()
+        path_mappings = settings.get('path_mappings', [])
+
+        for mapping in path_mappings:
+            host_cache_path = mapping.get('host_cache_path', '')
+            cache_path = mapping.get('cache_path', '')
+
+            if not host_cache_path or not cache_path:
+                continue
+            if host_cache_path == cache_path:
+                continue  # No translation needed
+
+            container_prefix = cache_path.rstrip('/')
+            if path.startswith(container_prefix):
+                host_prefix = host_cache_path.rstrip('/')
+                return path.replace(container_prefix, host_prefix, 1)
+
+        return path
 
     def _format_size(self, size_bytes: int) -> str:
         """Format bytes into human-readable string"""
@@ -100,7 +145,13 @@ class CacheService:
         return 250 * 1024**3
 
     def get_cached_files_list(self) -> List[str]:
-        """Get list of cached file paths from exclude file"""
+        """Get list of cached file paths from timestamps.json (primary) or exclude file (fallback)"""
+        # Primary: Use timestamps.json as the source of truth for cached files
+        timestamps = self.get_timestamps()
+        if timestamps:
+            return list(timestamps.keys())
+
+        # Fallback: Use exclude file for backwards compatibility
         if not self.exclude_file.exists():
             return []
 
@@ -253,6 +304,145 @@ class CacheService:
 
         return max(0, min(100, score))
 
+    def calculate_priority_with_breakdown(
+        self,
+        cache_path: str,
+        timestamps: Dict,
+        ondeck: Dict,
+        watchlist: Dict,
+        settings: Dict
+    ) -> Tuple[int, Dict[str, Any]]:
+        """
+        Calculate priority score with detailed breakdown for UI display.
+
+        Returns:
+            Tuple of (final_score, breakdown_dict) where breakdown_dict contains
+            base score, each bonus, and human-readable factors list.
+        """
+        breakdown = {
+            "base": 50,
+            "source_bonus": 0,
+            "user_bonus": 0,
+            "recency_bonus": 0,
+            "age_bonus": 0,
+            "episode_bonus": 0,
+            "factors": []
+        }
+        score = 50
+        now = datetime.now()
+
+        # Get timestamp info
+        ts_info = timestamps.get(cache_path, {})
+        cached_at_str = ts_info.get("cached_at") if isinstance(ts_info, dict) else ts_info
+        source = ts_info.get("source", "unknown") if isinstance(ts_info, dict) else "unknown"
+
+        # Try to find in ondeck/watchlist trackers
+        ondeck_info = None
+        watchlist_info = None
+        cache_basename = os.path.basename(cache_path)
+
+        for plex_path, info in ondeck.items():
+            if os.path.basename(plex_path) == cache_basename:
+                ondeck_info = info
+                source = "ondeck"
+                break
+
+        for plex_path, info in watchlist.items():
+            if os.path.basename(plex_path) == cache_basename:
+                watchlist_info = info
+                if not ondeck_info:
+                    source = "watchlist"
+                break
+
+        # Factor 1: Source type
+        if source == "ondeck":
+            score += 20
+            breakdown["source_bonus"] = 20
+            breakdown["factors"].append({"label": "OnDeck source", "value": 20})
+
+        # Factor 2: User count
+        users = set()
+        if ondeck_info and "users" in ondeck_info:
+            users.update(ondeck_info["users"])
+        if watchlist_info and "users" in watchlist_info:
+            users.update(watchlist_info["users"])
+
+        user_bonus = min(len(users) * 5, 15)
+        if user_bonus > 0:
+            score += user_bonus
+            breakdown["user_bonus"] = user_bonus
+            user_label = f"Multiple users ({len(users)})" if len(users) > 1 else "Single user"
+            breakdown["factors"].append({"label": user_label, "value": user_bonus})
+
+        # Factor 3: Cache recency
+        if cached_at_str:
+            try:
+                cached_at = datetime.fromisoformat(cached_at_str)
+                hours_cached = (now - cached_at).total_seconds() / 3600
+
+                if hours_cached < 24:
+                    score += 15
+                    breakdown["recency_bonus"] = 15
+                    breakdown["factors"].append({"label": "Recently cached (<24h)", "value": 15})
+                elif hours_cached < 72:
+                    score += 10
+                    breakdown["recency_bonus"] = 10
+                    breakdown["factors"].append({"label": "Cached recently (<72h)", "value": 10})
+                elif hours_cached < 168:
+                    score += 5
+                    breakdown["recency_bonus"] = 5
+                    breakdown["factors"].append({"label": "Cached this week", "value": 5})
+            except (ValueError, TypeError):
+                pass
+
+        # Factor 4: Watchlist/OnDeck age
+        if watchlist_info and "watchlisted_at" in watchlist_info:
+            try:
+                watchlisted_at = datetime.fromisoformat(watchlist_info["watchlisted_at"])
+                days_on_watchlist = (now - watchlisted_at).days
+
+                if days_on_watchlist < 7:
+                    score += 10
+                    breakdown["age_bonus"] = 10
+                    breakdown["factors"].append({"label": "Fresh on watchlist (<7d)", "value": 10})
+                elif days_on_watchlist > 60:
+                    score -= 10
+                    breakdown["age_bonus"] = -10
+                    breakdown["factors"].append({"label": "Stale watchlist (>60d)", "value": -10})
+            except (ValueError, TypeError):
+                pass
+
+        if ondeck_info and "last_seen" in ondeck_info:
+            try:
+                last_seen = datetime.fromisoformat(ondeck_info["last_seen"])
+                days_since_seen = (now - last_seen).days
+
+                if days_since_seen < 7:
+                    score += 10
+                    breakdown["age_bonus"] = 10
+                    breakdown["factors"].append({"label": "Recently on OnDeck (<7d)", "value": 10})
+                elif days_since_seen > 60:
+                    score -= 10
+                    breakdown["age_bonus"] = -10
+                    breakdown["factors"].append({"label": "Stale OnDeck (>60d)", "value": -10})
+            except (ValueError, TypeError):
+                pass
+
+        # Factor 5: Episode position (for TV)
+        if ondeck_info and "episode_info" in ondeck_info:
+            ep_info = ondeck_info["episode_info"]
+            if ep_info.get("is_current_ondeck"):
+                score += 15
+                breakdown["episode_bonus"] = 15
+                breakdown["factors"].append({"label": "Current episode", "value": 15})
+            elif ep_info.get("episode"):
+                score += 10
+                breakdown["episode_bonus"] = 10
+                breakdown["factors"].append({"label": "Prefetched episode", "value": 10})
+
+        final_score = max(0, min(100, score))
+        return final_score, breakdown
+
     def get_all_cached_files(
         self,
         source_filter: str = "all",
@@ -399,8 +589,8 @@ class CacheService:
             except OSError:
                 pass
 
-        # Get actual cache drive usage
-        cache_dir = settings.get("cache_dir", "")
+        # Get actual cache drive usage (use path_mappings cache_path for consistency)
+        cache_dir = self._get_cache_dir(settings)
         disk_used = 0
         disk_total = 0
         usage_percent = 0
@@ -493,8 +683,8 @@ class CacheService:
         # Get all cached files with metadata
         all_files = self.get_all_cached_files()
 
-        # Storage Overview
-        cache_dir = settings.get("cache_dir", "")
+        # Storage Overview (use path_mappings cache_path for consistency)
+        cache_dir = self._get_cache_dir(settings)
         disk_used = 0
         disk_total = 0
         disk_free = 0
@@ -757,6 +947,202 @@ class CacheService:
 
         return "\n".join(lines)
 
+    def get_priority_report_data(self) -> Dict[str, Any]:
+        """
+        Generate structured priority report data for the UI.
+
+        Returns dict with summary stats, tier distribution, files with breakdowns,
+        and eviction settings.
+        """
+        import shutil
+
+        cached_paths = self.get_cached_files_list()
+        timestamps = self.get_timestamps()
+        ondeck = self.get_ondeck_tracker()
+        watchlist = self.get_watchlist_tracker()
+        settings = self._load_settings()
+
+        now = datetime.now()
+
+        # Get all cached files
+        all_files = self.get_all_cached_files()
+
+        # Build files list with priority breakdowns
+        files_with_breakdown = []
+        for f in all_files:
+            _, breakdown = self.calculate_priority_with_breakdown(
+                f.path, timestamps, ondeck, watchlist, settings
+            )
+            files_with_breakdown.append({
+                "path": f.path,
+                "filename": f.filename,
+                "size": f.size,
+                "size_display": f.size_display,
+                "cached_at": f.cached_at.isoformat() if f.cached_at else None,
+                "cache_age_hours": f.cache_age_hours,
+                "source": f.source,
+                "priority_score": f.priority_score,
+                "users": f.users,
+                "is_ondeck": f.is_ondeck,
+                "is_watchlist": f.is_watchlist,
+                "priority_breakdown": breakdown
+            })
+
+        # Calculate tier distribution
+        high_files = [f for f in files_with_breakdown if f["priority_score"] >= 70]
+        medium_files = [f for f in files_with_breakdown if 40 <= f["priority_score"] < 70]
+        low_files = [f for f in files_with_breakdown if f["priority_score"] < 40]
+
+        total_count = len(files_with_breakdown)
+        total_size = sum(f["size"] for f in files_with_breakdown)
+
+        def calc_percent(count: int, total: int) -> float:
+            return round((count / total * 100), 1) if total > 0 else 0
+
+        tiers = {
+            "high": {
+                "count": len(high_files),
+                "percent": calc_percent(len(high_files), total_count),
+                "size": sum(f["size"] for f in high_files),
+                "size_display": self._format_size(sum(f["size"] for f in high_files))
+            },
+            "medium": {
+                "count": len(medium_files),
+                "percent": calc_percent(len(medium_files), total_count),
+                "size": sum(f["size"] for f in medium_files),
+                "size_display": self._format_size(sum(f["size"] for f in medium_files))
+            },
+            "low": {
+                "count": len(low_files),
+                "percent": calc_percent(len(low_files), total_count),
+                "size": sum(f["size"] for f in low_files),
+                "size_display": self._format_size(sum(f["size"] for f in low_files))
+            }
+        }
+
+        # Summary by source
+        ondeck_count = sum(1 for f in files_with_breakdown if f["is_ondeck"])
+        watchlist_count = sum(1 for f in files_with_breakdown if f["is_watchlist"] and not f["is_ondeck"])
+        other_count = sum(1 for f in files_with_breakdown if not f["is_ondeck"] and not f["is_watchlist"])
+
+        summary = {
+            "total": total_count,
+            "ondeck_count": ondeck_count,
+            "watchlist_count": watchlist_count,
+            "other_count": other_count,
+            "total_size": total_size,
+            "total_size_display": self._format_size(total_size)
+        }
+
+        # Eviction settings and current status
+        eviction_mode = settings.get("cache_eviction_mode", "none")
+        eviction_threshold = settings.get("cache_eviction_threshold_percent", 95)
+        eviction_min_priority = settings.get("eviction_min_priority", 60)
+
+        # Calculate current drive usage (use path_mappings cache_path for consistency)
+        cache_dir = self._get_cache_dir(settings)
+        current_usage_percent = 0
+        disk_used = 0
+        disk_total = 0
+
+        if cache_dir and os.path.exists(cache_dir):
+            try:
+                disk = shutil.disk_usage(cache_dir)
+                disk_used = disk.used
+                disk_total = disk.total
+                current_usage_percent = round((disk.used / disk.total) * 100, 1)
+            except (OSError, AttributeError):
+                pass
+
+        # Calculate how many files would be evicted at current threshold
+        would_evict_count = 0
+        would_evict_size = 0
+        if eviction_mode != "none":
+            # Files below min_priority are eviction candidates
+            eviction_candidates = [f for f in files_with_breakdown if f["priority_score"] < eviction_min_priority]
+            would_evict_count = len(eviction_candidates)
+            would_evict_size = sum(f["size"] for f in eviction_candidates)
+
+        eviction = {
+            "mode": eviction_mode,
+            "enabled": eviction_mode != "none",
+            "threshold_percent": eviction_threshold,
+            "min_priority": eviction_min_priority,
+            "current_usage_percent": current_usage_percent,
+            "would_evict_count": would_evict_count,
+            "would_evict_size": would_evict_size,
+            "would_evict_size_display": self._format_size(would_evict_size)
+        }
+
+        return {
+            "summary": summary,
+            "tiers": tiers,
+            "files": files_with_breakdown,
+            "eviction": eviction
+        }
+
+    def simulate_eviction(self, threshold_percent: int) -> Dict[str, Any]:
+        """
+        Simulate which files would be evicted at a given threshold.
+
+        Args:
+            threshold_percent: Simulated eviction threshold (50-100)
+
+        Returns dict with files that would be evicted and space freed.
+        """
+        import shutil
+
+        settings = self._load_settings()
+        cache_dir = self._get_cache_dir(settings)
+
+        # Get current drive usage
+        disk_used = 0
+        disk_total = 0
+        if cache_dir and os.path.exists(cache_dir):
+            try:
+                disk = shutil.disk_usage(cache_dir)
+                disk_used = disk.used
+                disk_total = disk.total
+            except (OSError, AttributeError):
+                pass
+
+        # Calculate target bytes at threshold
+        target_bytes = int(disk_total * threshold_percent / 100) if disk_total > 0 else 0
+        bytes_to_free = max(0, disk_used - target_bytes)
+
+        # Get all files sorted by priority (lowest first = evict first)
+        all_files = self.get_all_cached_files(sort_by="priority", sort_dir="asc")
+
+        # Determine which files would be evicted
+        would_evict = []
+        freed_so_far = 0
+
+        for f in all_files:
+            if freed_so_far >= bytes_to_free:
+                break
+            would_evict.append({
+                "path": f.path,
+                "filename": f.filename,
+                "size": f.size,
+                "size_display": f.size_display,
+                "priority_score": f.priority_score,
+                "source": f.source
+            })
+            freed_so_far += f.size
+
+        remaining_count = len(all_files) - len(would_evict)
+
+        return {
+            "threshold_percent": threshold_percent,
+            "current_usage_percent": round((disk_used / disk_total * 100), 1) if disk_total > 0 else 0,
+            "target_usage_percent": threshold_percent,
+            "bytes_to_free": bytes_to_free,
+            "bytes_to_free_display": self._format_size(bytes_to_free),
+            "would_evict": would_evict,
+            "total_freed": freed_so_far,
+            "total_freed_display": self._format_size(freed_so_far),
+            "remaining_count": remaining_count
+        }
 
     def evict_file(self, cache_path: str) -> Dict[str, Any]:
         """
@@ -868,8 +1254,10 @@ class CacheService:
             with open(self.exclude_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
-            # Filter out the path
-            new_lines = [line for line in lines if line.strip() != cache_path]
+            # Translate container path to host path for comparison
+            # (exclude file contains host paths for Unraid mover)
+            host_path = self._translate_container_to_host_path(cache_path)
+            new_lines = [line for line in lines if line.strip() != host_path]
 
             with open(self.exclude_file, 'w', encoding='utf-8') as f:
                 f.writelines(new_lines)

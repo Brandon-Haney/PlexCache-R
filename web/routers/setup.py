@@ -229,11 +229,14 @@ async def setup_step3_post(request: Request):
     path_mappings = []
     mapping_index = 0
     while f"mapping_name_{mapping_index}" in form_data:
+        cache_path = form_data.get(f"mapping_cache_path_{mapping_index}", "")
+        host_cache_path = form_data.get(f"mapping_host_cache_path_{mapping_index}", "")
         mapping = {
             "name": form_data.get(f"mapping_name_{mapping_index}", ""),
             "plex_path": form_data.get(f"mapping_plex_path_{mapping_index}", ""),
             "real_path": form_data.get(f"mapping_real_path_{mapping_index}", ""),
-            "cache_path": form_data.get(f"mapping_cache_path_{mapping_index}", ""),
+            "cache_path": cache_path,
+            "host_cache_path": host_cache_path if host_cache_path else cache_path,  # Default to cache_path if not set
             "cacheable": form_data.get(f"mapping_cacheable_{mapping_index}") == "on",
             "enabled": True
         }
@@ -276,12 +279,15 @@ async def setup_step3_post(request: Request):
                 # Generate cache_path from library folder name
                 lib_folder = plex_path_normalized.rstrip('/').split('/')[-1]
                 cache_path = f"{cache_dir_normalized}/{lib_folder}/" if is_cacheable else None
+                # host_cache_path defaults to same as cache_path (user can override in settings)
+                host_cache_path = cache_path
 
                 path_mappings.append({
                     "name": mapping_name,
                     "plex_path": plex_path_normalized,
                     "real_path": real_path,
                     "cache_path": cache_path,
+                    "host_cache_path": host_cache_path,
                     "cacheable": is_cacheable,
                     "enabled": True
                 })
@@ -775,9 +781,11 @@ async def detect_import_files():
         "has_import_files": summary.has_import_files,
         "has_settings": summary.has_settings,
         "has_data": summary.has_data,
+        "has_exclude_file": summary.has_exclude_file,
         "timestamps_count": summary.timestamps_count,
         "ondeck_count": summary.ondeck_count,
         "watchlist_count": summary.watchlist_count,
+        "exclude_entries_count": summary.exclude_entries_count,
         "detected_cache_prefix": summary.detected_cache_prefix,
         "errors": summary.errors
     })
@@ -801,12 +809,14 @@ async def execute_import(request: Request):
     )
 
     if success and imported_settings:
-        # Clear setup state since we imported settings
-        clear_setup_state()
+        # Store imported settings in setup state for verification
+        # User needs to verify Plex URL which may differ in Docker
+        update_setup_state(imported_settings)
 
+    # Redirect to Step 2 to verify Plex connection (URL often differs CLI vs Docker)
     return JSONResponse({
         "success": success,
         "message": message,
         "imported_settings": bool(imported_settings),
-        "redirect": "/" if success and imported_settings else None
+        "redirect": "/setup?step=2" if success and imported_settings else None
     })

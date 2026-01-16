@@ -324,6 +324,72 @@ async def cache_storage_stats(request: Request, expiring_within: int = 7):
     )
 
 
+@router.get("/cache/priorities-content", response_class=HTMLResponse)
+async def cache_priorities_content(
+    request: Request,
+    sort: str = "priority",
+    dir: str = "desc"
+):
+    """Priority report content partial for lazy loading"""
+    cache_service = get_cache_service()
+    settings_service = get_settings_service()
+
+    # Get structured report data
+    report_data = cache_service.get_priority_report_data()
+
+    # Get eviction mode for conditional display
+    settings = settings_service.get_all()
+    eviction_enabled = settings.get("cache_eviction_mode", "none") != "none"
+
+    # Sort files if needed
+    files = report_data["files"]
+    reverse = (dir == "desc")
+
+    sort_keys = {
+        "filename": lambda f: f["filename"].lower(),
+        "size": lambda f: f["size"],
+        "priority": lambda f: f["priority_score"],
+        "age": lambda f: f["cache_age_hours"],
+        "users": lambda f: len(f["users"]),
+        "source": lambda f: (f["is_ondeck"], f["is_watchlist"]),
+    }
+
+    sort_key = sort_keys.get(sort, sort_keys["priority"])
+    files.sort(key=sort_key, reverse=reverse)
+    report_data["files"] = files
+
+    return templates.TemplateResponse(
+        "cache/partials/priorities_content.html",
+        {
+            "request": request,
+            "data": report_data,
+            "eviction_enabled": eviction_enabled,
+            "sort_by": sort,
+            "sort_dir": dir
+        }
+    )
+
+
+@router.get("/cache/simulate-eviction", response_class=HTMLResponse)
+async def simulate_eviction(request: Request, threshold: int = 95):
+    """Simulate eviction at a given threshold percentage"""
+    cache_service = get_cache_service()
+
+    # Validate threshold (50-100)
+    threshold = max(50, min(100, threshold))
+
+    result = cache_service.simulate_eviction(threshold)
+
+    return templates.TemplateResponse(
+        "cache/partials/eviction_simulation.html",
+        {
+            "request": request,
+            "threshold": threshold,
+            "result": result
+        }
+    )
+
+
 @router.get("/settings/schedule/validate-cron")
 async def validate_cron_expression(expression: str):
     """Validate a cron expression (JSON)"""
@@ -454,3 +520,34 @@ async def trigger_run(dry_run: bool = False, verbose: bool = False):
             "message": "Failed to start operation",
             "running": False
         }
+
+
+@router.get("/operation-indicator", response_class=HTMLResponse)
+async def get_operation_indicator(request: Request):
+    """Return global operation indicator HTML - used for header status across all pages"""
+    operation_runner = get_operation_runner()
+    is_running = operation_runner.is_running
+
+    if is_running:
+        return templates.TemplateResponse(
+            "components/global_operation_indicator.html",
+            {"request": request, "is_running": True}
+        )
+    else:
+        # Return empty div that continues polling less frequently
+        return templates.TemplateResponse(
+            "components/global_operation_indicator.html",
+            {"request": request, "is_running": False}
+        )
+
+
+@router.get("/operation-banner", response_class=HTMLResponse)
+async def get_operation_banner(request: Request):
+    """Return global operation status banner HTML - shown on all pages when operation is running"""
+    operation_runner = get_operation_runner()
+    status = operation_runner.get_status_dict()
+
+    return templates.TemplateResponse(
+        "components/global_operation_banner.html",
+        {"request": request, "status": status}
+    )

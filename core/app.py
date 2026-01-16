@@ -34,7 +34,10 @@ class PlexCacheApp:
         # Initialize components
         self.config_manager = ConfigManager(config_file)
         self.system_detector = SystemDetector()
-        self.file_utils = FileUtils(self.system_detector.is_linux)
+        self.file_utils = FileUtils(
+            self.system_detector.is_linux,
+            is_docker=self.system_detector.is_docker
+        )
         
         # Will be initialized after config loading
         self.logging_manager = None
@@ -57,7 +60,20 @@ class PlexCacheApp:
         self.moved_to_array_count = 0
         self.moved_to_array_bytes = 0
         self.cached_bytes = 0
-        
+
+        # Stop request flag (for web UI to abort operations)
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        """Request the operation to stop gracefully after current file."""
+        self._stop_requested = True
+        logging.info("Stop requested - operation will stop after current file completes")
+
+    @property
+    def should_stop(self) -> bool:
+        """Check if stop has been requested."""
+        return self._stop_requested
+
     def run(self) -> None:
         """Run the main application."""
         try:
@@ -104,11 +120,20 @@ class PlexCacheApp:
             logging.debug("Initializing components...")
             self._initialize_components()
 
+            # Warn if .plexcached backups are disabled
+            if not self.config_manager.cache.create_plexcached_backups:
+                logging.warning("BACKUPS DISABLED - No .plexcached files will be created. Cached files cannot be recovered if cache drive fails.")
+
+            # Log hard-linked files handling mode
+            if self.config_manager.cache.hardlinked_files == "move":
+                logging.info("Hard-linked files mode: MOVE - Hard-linked files will be cached (seed copies preserved via remaining hard links)")
+
             # Clean up stale exclude list entries (self-healing)
+            # Skip in dry-run mode to avoid modifying tracking files
             if not self.dry_run:
                 self.file_filter.clean_stale_exclude_entries()
             else:
-                logging.debug("[DRY RUN] Would clean stale exclude list entries")
+                logging.debug("[DRY RUN] Skipping stale exclude list cleanup")
 
             # Check paths
             logging.debug("Validating paths...")
@@ -120,12 +145,26 @@ class PlexCacheApp:
             # Check for active sessions
             self._check_active_sessions()
 
+            # Check for stop request before processing
+            if self.should_stop:
+                logging.info("Operation stopped before processing media")
+                return
+
             # Process media
             self._process_media()
+
+            # Check for stop request before moving files
+            if self.should_stop:
+                logging.info("Operation stopped before moving files")
+                return
 
             # Move files
             self._move_files()
 
+            # Check for stop request after moving files
+            if self.should_stop:
+                logging.info("Operation stopped by user")
+                return
 
             # Update Unraid mover exclusion file
             logging.debug("Updating Unraid mover exclusions...")
@@ -269,8 +308,9 @@ class PlexCacheApp:
         moved_to_array = len(self.media_to_array)
 
         logging.info(f"Already cached: {already_cached} files")
-        logging.info(f"Moved to cache: {actually_moved} files")
-        logging.info(f"Moved to array: {moved_to_array} files")
+        move_verb = "Would move" if self.dry_run else "Moved"
+        logging.info(f"{move_verb} to cache: {actually_moved} files")
+        logging.info(f"{move_verb} to array: {moved_to_array} files")
 
         # Additional detail at DEBUG level
         # Note: Empty folder cleanup now happens immediately during file operations
@@ -377,7 +417,8 @@ class PlexCacheApp:
             cache_retention_hours=self.config_manager.cache.cache_retention_hours,
             ondeck_tracker=self.ondeck_tracker,
             watchlist_tracker=self.watchlist_tracker,
-            path_modifier=self.file_path_modifier
+            path_modifier=self.file_path_modifier,
+            is_docker=self.system_detector.is_docker
         )
 
         self.file_mover = FileMover(
@@ -388,7 +429,10 @@ class PlexCacheApp:
             debug=self.dry_run,
             mover_cache_exclude_file=str(mover_exclude),
             timestamp_tracker=self.timestamp_tracker,
-            path_modifier=self.file_path_modifier
+            path_modifier=self.file_path_modifier,
+            stop_check=lambda: self.should_stop,  # Allow FileMover to check for stop requests
+            create_plexcached_backups=self.config_manager.cache.create_plexcached_backups,
+            hardlinked_files=self.config_manager.cache.hardlinked_files
         )
 
     def _init_cache_management(self) -> None:
@@ -403,6 +447,72 @@ class PlexCacheApp:
             eviction_min_priority=self.config_manager.cache.eviction_min_priority,
             number_episodes=self.config_manager.plex.number_episodes
         )
+
+    def _migrate_exclude_file_paths(self, exclude_file: Path) -> None:
+        """Migrate exclude file entries from container paths to host paths (Docker only).
+
+        When running in Docker, the container sees paths like /mnt/cache/... but the host
+        (where Unraid mover runs) sees /mnt/cache_downloads/.... This method translates
+        existing entries to use host paths so the Unraid mover recognizes them.
+
+        This migration is:
+        - Automatic: runs on startup without user intervention
+        - Safe: only translates paths, doesn't delete entries
+        - Idempotent: already-translated paths won't match container prefix
+        """
+        if not self.system_detector.is_docker:
+            return
+
+        if not exclude_file.exists():
+            return
+
+        # Build translation map from path_mappings: container_prefix -> host_prefix
+        translations = {}
+        for mapping in self.config_manager.paths.path_mappings:
+            if mapping.cache_path and mapping.host_cache_path:
+                if mapping.cache_path != mapping.host_cache_path:
+                    container_prefix = mapping.cache_path.rstrip('/')
+                    host_prefix = mapping.host_cache_path.rstrip('/')
+                    translations[container_prefix] = host_prefix
+
+        if not translations:
+            return  # No translations needed
+
+        # Read existing entries
+        try:
+            with open(exclude_file, 'r') as f:
+                entries = [line.strip() for line in f if line.strip()]
+        except (IOError, OSError) as e:
+            logging.warning(f"Could not read exclude file for migration: {e}")
+            return
+
+        if not entries:
+            return
+
+        # Translate entries that still have container paths
+        migrated_count = 0
+        translated_entries = []
+
+        for entry in entries:
+            translated = entry
+            for container_prefix, host_prefix in translations.items():
+                if entry.startswith(container_prefix):
+                    translated = entry.replace(container_prefix, host_prefix, 1)
+                    migrated_count += 1
+                    break
+            translated_entries.append(translated)
+
+        # Only write if we actually migrated something
+        if migrated_count > 0:
+            try:
+                with open(exclude_file, 'w') as f:
+                    for entry in translated_entries:
+                        f.write(f"{entry}\n")
+                logging.info(f"Migrated {migrated_count} exclude file entries to host paths")
+                for container_prefix, host_prefix in translations.items():
+                    logging.debug(f"  Translated: {container_prefix} -> {host_prefix}")
+            except (IOError, OSError) as e:
+                logging.error(f"Could not write migrated exclude file: {e}")
 
     def _initialize_components(self) -> None:
         """Initialize components that depend on configuration."""
@@ -424,6 +534,9 @@ class PlexCacheApp:
         if not mover_exclude.exists():
             mover_exclude.touch()
             logging.info(f"Created mover exclude file: {mover_exclude}")
+
+        # Migrate exclude file paths from container to host paths (Docker only)
+        self._migrate_exclude_file_paths(mover_exclude)
 
         # Initialize trackers
         self._init_trackers(mover_exclude, timestamp_file)
@@ -447,6 +560,41 @@ class PlexCacheApp:
 
     def _check_paths(self) -> None:
         """Check that required paths exist and are accessible."""
+        # In Docker, validate that mount points are properly configured
+        # This prevents writing massive amounts of data inside the container
+        if self.system_detector.is_docker:
+            paths_to_validate = set()
+
+            # Collect paths from path_mappings
+            if self.config_manager.paths.path_mappings:
+                for mapping in self.config_manager.paths.path_mappings:
+                    if mapping.enabled:
+                        if mapping.real_path:
+                            # Extract base mount point (e.g., /mnt/user from /mnt/user/Movies/)
+                            parts = mapping.real_path.strip('/').split('/')
+                            if len(parts) >= 2:
+                                paths_to_validate.add('/' + '/'.join(parts[:2]))
+                        if mapping.cache_path:
+                            parts = mapping.cache_path.strip('/').split('/')
+                            if len(parts) >= 2:
+                                paths_to_validate.add('/' + '/'.join(parts[:2]))
+
+            # Also check common Unraid paths
+            paths_to_validate.update(['/mnt/cache', '/mnt/user', '/mnt/user0'])
+
+            # Validate mounts
+            mount_warnings = self.system_detector.validate_docker_mounts(list(paths_to_validate))
+            for warning in mount_warnings:
+                logging.warning(warning)
+
+            # If any critical mount is not properly mounted, abort
+            if mount_warnings:
+                raise RuntimeError(
+                    "Docker mount validation failed! One or more paths may not be properly mounted. "
+                    "This could cause data to be written inside the container instead of to mounted volumes. "
+                    "Check your Docker volume configuration and ensure source paths exist on the host."
+                )
+
         if self.config_manager.paths.path_mappings:
             # Multi-path mode: check paths from enabled mappings
             for mapping in self.config_manager.paths.path_mappings:
@@ -1279,7 +1427,17 @@ class PlexCacheApp:
 
                 # Delete cache copy
                 if os.path.exists(cache_path):
+                    # Check for hardlinks before deleting
+                    try:
+                        stat_info = os.stat(cache_path)
+                        if stat_info.st_nlink > 1:
+                            logging.debug(f"File has {stat_info.st_nlink} hardlinks, deleting won't free space: {os.path.basename(cache_path)}")
+                    except OSError:
+                        pass
                     os.remove(cache_path)
+                    logging.debug(f"Deleted cache file: {os.path.basename(cache_path)}")
+                else:
+                    logging.debug(f"Cache file already gone: {os.path.basename(cache_path)}")
 
                 # Clean up tracking
                 self.file_filter.remove_files_from_exclude_list([cache_path])
@@ -1368,28 +1526,34 @@ class PlexCacheApp:
         if total_size > 0:
             logging.debug(f"Moving {total_size:.2f} {total_size_unit} to {destination}")
             # Generate summary message with restore vs move separation for array moves
+            # Use conditional wording for dry run mode
+            would_prefix = "[DRY RUN] Would have " if self.dry_run else ""
             if destination == 'array':
                 parts = []
                 if self.restored_count > 0:
                     unit = "episode" if self.restored_count == 1 else "episodes"
                     size_gb = self.restored_bytes / (1024**3)
-                    parts.append(f"Returned {self.restored_count} {unit} ({size_gb:.2f} GB) to array")
+                    verb = "return" if self.dry_run else "Returned"
+                    parts.append(f"{would_prefix}{verb} {self.restored_count} {unit} ({size_gb:.2f} GB) to array")
                 if self.moved_to_array_count > 0:
                     unit = "episode" if self.moved_to_array_count == 1 else "episodes"
                     size_gb = self.moved_to_array_bytes / (1024**3)
-                    parts.append(f"Copied {self.moved_to_array_count} {unit} ({size_gb:.2f} GB) to array")
+                    verb = "copy" if self.dry_run else "Copied"
+                    parts.append(f"{would_prefix}{verb} {self.moved_to_array_count} {unit} ({size_gb:.2f} GB) to array")
                 if parts:
                     self.logging_manager.add_summary_message(', '.join(parts))
                 else:
+                    verb = "move" if self.dry_run else "Moved"
                     self.logging_manager.add_summary_message(
-                        f"Moved {total_size:.2f} {total_size_unit} to {destination}"
+                        f"{would_prefix}{verb} {total_size:.2f} {total_size_unit} to {destination}"
                     )
             else:
                 # Track cached bytes for summary
                 size_multipliers = {'KB': 1024, 'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4}
                 self.cached_bytes = int(total_size * size_multipliers.get(total_size_unit, 1))
+                verb = "cache" if self.dry_run else "Cached"
                 self.logging_manager.add_summary_message(
-                    f"Cached {total_size:.2f} {total_size_unit}"
+                    f"{would_prefix}{verb} {total_size:.2f} {total_size_unit}"
                 )
             
             free_space, free_space_unit = self.file_utils.get_free_space(
@@ -1435,7 +1599,8 @@ class PlexCacheApp:
                 logging.debug(f"Found {len(files_to_move_back)} files to move back to array")
                 self.media_to_array.extend(files_to_move_back)
 
-            # Always clean up stale entries from exclude list (files that no longer exist on cache)
+            # Clean up stale entries from exclude list (files that no longer exist on cache)
+            # Skip in dry-run mode to avoid modifying tracking files
             if cache_paths_to_remove and not self.dry_run:
                 self.file_filter.remove_files_from_exclude_list(cache_paths_to_remove)
             elif cache_paths_to_remove and self.dry_run:
@@ -1464,7 +1629,8 @@ class PlexCacheApp:
             already_cached=already_cached,
             duration_seconds=execution_time_seconds,
             had_errors=False,  # Could track this via error count if needed
-            had_warnings=False
+            had_warnings=False,
+            dry_run=self.dry_run
         )
 
         self.logging_manager.log_summary()
@@ -1473,10 +1639,12 @@ class PlexCacheApp:
         # (per File and Folder Management Policy) - no blanket cleanup needed here
 
         # Clean up stale timestamp entries for files that no longer exist
+        # Skip in dry-run mode to avoid modifying tracking files
         if hasattr(self, 'timestamp_tracker') and self.timestamp_tracker and not self.dry_run:
             self.timestamp_tracker.cleanup_missing_files()
 
         # Clean up stale watchlist tracker entries
+        # Skip in dry-run mode to avoid modifying tracking files
         if hasattr(self, 'watchlist_tracker') and self.watchlist_tracker and not self.dry_run:
             self.watchlist_tracker.cleanup_stale_entries()
             self.watchlist_tracker.cleanup_missing_files()

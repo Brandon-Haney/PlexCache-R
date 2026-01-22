@@ -20,11 +20,13 @@ ENV PYTHONUNBUFFERED=1 \
     LOG_LEVEL=INFO
 
 # Install system dependencies
+# php-cli is needed for Unraid's notify script (optional mount for Unraid notifications)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     tini \
     tzdata \
     curl \
+    php-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

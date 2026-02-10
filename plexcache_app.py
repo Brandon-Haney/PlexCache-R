@@ -15,7 +15,7 @@ import os
 
 from config import ConfigManager
 from logging_config import LoggingManager, reset_warning_error_flag
-from system_utils import SystemDetector, FileUtils, SingleInstanceLock
+from system_utils import SystemDetector, FileUtils, SingleInstanceLock, detect_zfs, set_zfs_prefixes
 from plex_api import PlexManager, OnDeckItem
 from file_operations import MultiPathModifier, SubtitleFinder, FileFilter, FileMover, CacheCleanup, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration
 
@@ -445,6 +445,34 @@ class PlexCacheApp:
             number_episodes=self.config_manager.plex.number_episodes
         )
 
+    def _detect_zfs_paths(self) -> None:
+        """Detect ZFS-backed path mappings and configure array-direct path conversion.
+
+        On Unraid, /mnt/user/ is normally converted to /mnt/user0/ (array-direct) to
+        avoid FUSE ambiguity. But ZFS pool-only shares (shareUseCache=only) never have
+        files at /mnt/user0/ — their files live on the ZFS pool. For these paths, we
+        skip the conversion so file operations work correctly.
+
+        Only runs on Unraid (non-ZFS systems are unaffected).
+        """
+        if not self.system_detector.is_unraid:
+            return
+
+        zfs_prefixes = set()
+        all_mappings = self.config_manager.paths.path_mappings or []
+
+        for mapping in all_mappings:
+            if not mapping.enabled:
+                continue
+            real_path = mapping.real_path or ""
+            if real_path.startswith('/mnt/user/') and detect_zfs(real_path):
+                prefix = real_path.rstrip('/') + '/'
+                zfs_prefixes.add(prefix)
+                logging.info(f"ZFS pool detected for: {real_path} (array-direct conversion disabled)")
+
+        if zfs_prefixes:
+            set_zfs_prefixes(zfs_prefixes)
+
     def _initialize_components(self) -> None:
         """Initialize components that depend on configuration."""
         logging.debug("Initializing application components...")
@@ -454,6 +482,9 @@ class PlexCacheApp:
 
         # Initialize path modifier and subtitle finder
         self._init_path_modifier()
+
+        # Detect ZFS-backed path mappings (must happen before any file operations)
+        self._detect_zfs_paths()
 
         # Get file paths for trackers
         mover_exclude = self.config_manager.get_cached_files_file()

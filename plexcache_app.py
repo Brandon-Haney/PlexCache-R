@@ -465,13 +465,20 @@ class PlexCacheApp:
             if not mapping.enabled:
                 continue
             real_path = mapping.real_path or ""
-            if real_path.startswith('/mnt/user/') and detect_zfs(real_path):
-                prefix = real_path.rstrip('/') + '/'
-                zfs_prefixes.add(prefix)
-                logging.info(f"ZFS pool detected for: {real_path} (array-direct conversion disabled)")
+            if real_path.startswith('/mnt/user/'):
+                is_zfs = detect_zfs(real_path)
+                if is_zfs:
+                    prefix = real_path.rstrip('/') + '/'
+                    zfs_prefixes.add(prefix)
+                    logging.info(f"ZFS pool detected for: {real_path} (array-direct conversion disabled)")
+                else:
+                    logging.debug(f"No ZFS detected for: {real_path} (standard array path)")
 
         if zfs_prefixes:
             set_zfs_prefixes(zfs_prefixes)
+            logging.info(f"ZFS prefixes configured: {zfs_prefixes}")
+        else:
+            logging.debug("No ZFS-backed paths found — all paths use standard array-direct conversion")
 
     def _initialize_components(self) -> None:
         """Initialize components that depend on configuration."""

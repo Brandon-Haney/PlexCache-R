@@ -201,15 +201,18 @@ class SystemDetector:
         self.is_docker = self._detect_docker()
         
     def _detect_unraid(self) -> bool:
-        """Detect if running on Unraid system."""
-        os_info = {
-            'Linux': '/mnt/user0/',
-            'Darwin': None,
-            'Windows': None
-        }
-        
-        unraid_path = os_info.get(self.os_name)
-        return os.path.exists(unraid_path) if unraid_path else False
+        """Detect if running on Unraid system.
+
+        Primary check: kernel version string contains 'Unraid' (e.g., '6.12.54-Unraid').
+        Fallback: /mnt/user0/ exists (standard array systems).
+        The kernel check works for all Unraid setups including ZFS-only pools
+        where /mnt/user0/ doesn't exist.
+        """
+        if self.os_name != 'Linux':
+            return False
+        if 'unraid' in platform.release().lower():
+            return True
+        return os.path.exists('/mnt/user0/')
     
     def _detect_docker(self) -> bool:
         """Detect if running inside a Docker container."""

@@ -2286,7 +2286,7 @@ class FileFilter:
 
             for i, part in enumerate(path_parts):
                 # Match Season folders
-                season_match = re.match(r'^(Season|Series)\s*(\d+)$', part, re.IGNORECASE)
+                season_match = re.match(r'^(Season|Series)\s*(\d+)', part, re.IGNORECASE)
                 if season_match:
                     season_num = int(season_match.group(2))
                     if i > 0:
@@ -2347,7 +2347,7 @@ class FileFilter:
             # Check if this is a TV show
             for i, part in enumerate(path_parts):
                 if (
-                    re.match(r'^(Season|Series)\s*\d+$', part, re.IGNORECASE)
+                    re.match(r'^(Season|Series)\s*\d+', part, re.IGNORECASE)
                     or re.match(r'^\d+$', part)
                     or re.match(r'^Specials$', part, re.IGNORECASE)
                 ):

@@ -10,7 +10,7 @@ import requests
 from fastapi import APIRouter, Request, Form, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from web.config import templates, CONFIG_DIR
+from web.config import templates, CONFIG_DIR, PLEXCACHE_PRODUCT_VERSION
 from web.services import get_settings_service, get_scheduler_service
 from core.system_utils import get_disk_usage, detect_zfs, parse_size_bytes
 from core.file_operations import (
@@ -28,7 +28,6 @@ router = APIRouter()
 
 # OAuth constants
 PLEXCACHE_PRODUCT_NAME = 'PlexCache-R'
-PLEXCACHE_PRODUCT_VERSION = '3.0'
 
 # Store OAuth state in memory (with lock for thread safety)
 _oauth_state: Dict[str, Any] = {}
@@ -524,6 +523,15 @@ async def settings_cache(request: Request):
         except Exception:
             pass
 
+    # Get tracked PlexCache files size for quota calculations
+    try:
+        from web.services import get_cache_service
+        cache_service = get_cache_service()
+        all_files = cache_service.get_all_cached_files()
+        drive_info["cached_files_bytes"] = sum(f.size for f in all_files)
+    except Exception:
+        drive_info["cached_files_bytes"] = 0
+
     return templates.TemplateResponse(
         "settings/cache.html",
         {
@@ -758,7 +766,8 @@ async def save_logging_settings(
     request: Request,
     max_log_files: int = Form(24),
     keep_error_logs_days: int = Form(7),
-    time_format: str = Form("24h")
+    time_format: str = Form("24h"),
+    activity_retention_hours: int = Form(24)
 ):
     """Save logging settings"""
     settings_service = get_settings_service()
@@ -766,7 +775,8 @@ async def save_logging_settings(
     success = settings_service.save_logging_settings({
         "max_log_files": max_log_files,
         "keep_error_logs_days": keep_error_logs_days,
-        "time_format": time_format
+        "time_format": time_format,
+        "activity_retention_hours": activity_retention_hours
     })
 
     if success:

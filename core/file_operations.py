@@ -2526,7 +2526,7 @@ class FileFilter:
 
             for i, part in enumerate(path_parts):
                 # Match Season folders
-                season_match = re.match(r'^(Season|Series)\s*(\d+)$', part, re.IGNORECASE)
+                season_match = re.match(r'^(Season|Series)\s*(\d+)', part, re.IGNORECASE)
                 if season_match:
                     season_num = int(season_match.group(2))
                     if i > 0:
@@ -2587,7 +2587,7 @@ class FileFilter:
             # Check if this is a TV show
             for i, part in enumerate(path_parts):
                 if (
-                    re.match(r'^(Season|Series)\s*\d+$', part, re.IGNORECASE)
+                    re.match(r'^(Season|Series)\s*\d+', part, re.IGNORECASE)
                     or re.match(r'^\d+$', part)
                     or re.match(r'^Specials$', part, re.IGNORECASE)
                 ):
@@ -3411,9 +3411,14 @@ class FileMover:
 
         (src, dest), cache_file_name, file_size, original_path = move_cmd_with_cache
         filename = os.path.basename(src)
+        thread_id = threading.get_ident()
 
         # Get per-worker byte progress callback
         worker_byte_cb = self._byte_aggregator.make_worker_callback() if self._byte_aggregator else None
+
+        # Register as active before starting
+        with self._progress_lock:
+            self._active_files[thread_id] = (filename, file_size)
 
         try:
             if destination == 'cache':
@@ -3431,9 +3436,10 @@ class FileMover:
             if worker_byte_cb and result in (0, 2) and file_size > 0:
                 worker_byte_cb(file_size, file_size)
 
-            # Update tqdm progress bar
+            # Update tqdm progress bar + remove from active
             with self._progress_lock:
                 self._completed_bytes += file_size
+                self._active_files.pop(thread_id, None)
                 if self._tqdm_pbar:
                     # Update description to show data progress
                     completed_str = format_bytes(self._completed_bytes)
@@ -3444,8 +3450,9 @@ class FileMover:
 
             return result
         except Exception as e:
-            # Still update progress on error
+            # Still update progress on error + remove from active
             with self._progress_lock:
+                self._active_files.pop(thread_id, None)
                 if self._tqdm_pbar:
                     self._tqdm_pbar.update(1)
             with get_console_lock():
@@ -3476,6 +3483,27 @@ class FileMover:
         If interrupted at any point, the original array file remains safe.
         Worst case: an orphaned cache copy exists that can be deleted.
         """
+        # Safety: ensure .plexcached rename uses array-direct path (/mnt/user0/)
+        # On Unraid, /mnt/user/ is FUSE which merges cache + array views.
+        # After copying to cache, renaming through /mnt/user/ targets the cache
+        # copy (FUSE prefers cache), not the array original. We must operate on
+        # /mnt/user0/ (array-direct) to rename the correct file.
+        #
+        # Direct probe (defense in depth): even if ZFS detection incorrectly
+        # marked a hybrid share as pool-only, this probe finds the real file.
+        if array_file.startswith('/mnt/user/'):
+            user0_path = '/mnt/user0/' + array_file[len('/mnt/user/'):]
+            if os.path.isfile(user0_path):
+                logging.debug(f"Using array-direct path for .plexcached rename: {user0_path}")
+                array_file = user0_path
+            elif not os.path.exists('/mnt/user0'):
+                raise IOError(
+                    f"Cannot safely create .plexcached backup: /mnt/user0 not accessible. "
+                    f"If running in Docker, ensure /mnt/user0 is mounted as a volume "
+                    f"(e.g., -v /mnt/user0:/mnt/user0)."
+                )
+            # else: /mnt/user0 accessible but file not there — true pool-only, FUSE path safe
+
         plexcached_file = array_file + PLEXCACHED_EXTENSION
         array_path = os.path.dirname(array_file)
 
@@ -3805,6 +3833,18 @@ class FileMover:
         try:
             # Derive the original array file path and .plexcached path
             array_file = os.path.join(array_path, os.path.basename(cache_file))
+
+            # Safety: ensure array operations use array-direct path (/mnt/user0/)
+            # to avoid FUSE path issues (see _move_to_cache for full explanation).
+            # Direct probe (defense in depth): bypasses ZFS prefix detection.
+            if array_file.startswith('/mnt/user/'):
+                user0_path = '/mnt/user0/' + array_file[len('/mnt/user/'):]
+                user0_plexcached = user0_path + PLEXCACHED_EXTENSION
+                if os.path.isfile(user0_path) or os.path.isfile(user0_plexcached):
+                    logging.debug(f"Using array-direct path for restore: {user0_path}")
+                    array_file = user0_path
+                    array_path = os.path.dirname(array_file)
+
             plexcached_file = array_file + PLEXCACHED_EXTENSION
 
             # Track operation type for activity logging

@@ -544,6 +544,15 @@ class PlexCacheApp:
         files at /mnt/user0/ — their files live on the ZFS pool. For these paths, we
         skip the conversion so file operations work correctly.
 
+        Hybrid detection: When a share has a ZFS cache but also has files on the array
+        (shareUseCache=yes/prefer), it is NOT pool-only. We verify by probing /mnt/user0/
+        for actual array files. If found, the share is hybrid and array-direct conversion
+        stays enabled — critical for correct .plexcached renames.
+
+        Note: This detection is a performance hint for get_array_direct_path(). Safety-
+        critical operations (_move_to_cache, _move_to_array) also probe /mnt/user0/
+        directly as defense in depth.
+
         Only runs on Unraid (non-ZFS systems are unaffected).
         """
         if not self.system_detector.is_unraid:
@@ -559,9 +568,35 @@ class PlexCacheApp:
             if real_path.startswith('/mnt/user/'):
                 is_zfs = detect_zfs(real_path)
                 if is_zfs:
-                    prefix = real_path.rstrip('/') + '/'
-                    zfs_prefixes.add(prefix)
-                    logging.info(f"ZFS pool detected for: {real_path} (array-direct conversion disabled)")
+                    # Verify truly pool-only by probing /mnt/user0/ for array files
+                    user0_path = '/mnt/user0/' + real_path[len('/mnt/user/'):]
+                    if os.path.exists('/mnt/user0'):
+                        user0_has_files = False
+                        if os.path.isdir(user0_path):
+                            try:
+                                with os.scandir(user0_path) as it:
+                                    user0_has_files = next(it, None) is not None
+                            except OSError:
+                                pass
+
+                        if user0_has_files:
+                            logging.info(
+                                f"ZFS cache detected for: {real_path}, but array files also exist "
+                                f"at {user0_path} — share is NOT pool-only (likely shareUseCache=yes/prefer). "
+                                f"Array-direct conversion remains enabled."
+                            )
+                        else:
+                            prefix = real_path.rstrip('/') + '/'
+                            zfs_prefixes.add(prefix)
+                            logging.info(f"ZFS pool-only detected for: {real_path} (array-direct conversion disabled)")
+                    else:
+                        # /mnt/user0 not accessible — cannot verify, assume pool-only
+                        prefix = real_path.rstrip('/') + '/'
+                        zfs_prefixes.add(prefix)
+                        logging.warning(
+                            f"ZFS detected for {real_path} but /mnt/user0 not accessible to verify. "
+                            f"Assuming pool-only."
+                        )
                 else:
                     logging.debug(f"No ZFS detected for: {real_path} (standard array path)")
 
@@ -720,6 +755,24 @@ class PlexCacheApp:
                     "This could cause data to be written inside the container instead of to mounted volumes. "
                     "Check your Docker volume configuration and ensure source paths exist on the host."
                 )
+
+            # Validate /mnt/user0 mount when .plexcached backups are enabled
+            # Without this mount, .plexcached renames operate through FUSE (/mnt/user/)
+            # which targets the cache copy instead of the array original
+            if self.config_manager.cache.create_plexcached_backups:
+                if not os.path.ismount('/mnt/user0'):
+                    if not os.path.exists('/mnt/user0'):
+                        logging.error(
+                            "CRITICAL: /mnt/user0 is not mounted but .plexcached backups are enabled. "
+                            "Without /mnt/user0, file renames will operate through FUSE (/mnt/user/) "
+                            "which can corrupt cached files. Add -v /mnt/user0:/mnt/user0 to your "
+                            "Docker configuration, or disable .plexcached backups in settings."
+                        )
+                    else:
+                        logging.warning(
+                            "/mnt/user0 exists but is not a mount point — it may be an empty "
+                            "directory inside the container. Verify your Docker volume configuration."
+                        )
 
         if self.config_manager.paths.path_mappings:
             # Multi-path mode: check paths from enabled mappings
@@ -926,6 +979,10 @@ class PlexCacheApp:
         for item in self.ondeck_items:
             self.source_map[item] = "ondeck"
 
+        if self.should_stop:
+            logging.info("Operation stopped during media processing")
+            return
+
         # Fetch subtitles for OnDeck media (already using real paths)
         logging.debug("Finding subtitles for OnDeck media...")
         ondeck_with_subtitles = self.subtitle_finder.get_media_subtitles(list(self.ondeck_items), files_to_skip=set(self.files_to_skip))
@@ -937,6 +994,10 @@ class PlexCacheApp:
         for item in ondeck_with_subtitles:
             if item not in self.source_map:
                 self.source_map[item] = "ondeck"
+
+        if self.should_stop:
+            logging.info("Operation stopped during media processing")
+            return
 
         # Process watchlist (returns already-modified paths)
         if self.config_manager.cache.watchlist_toggle:
@@ -952,6 +1013,10 @@ class PlexCacheApp:
                     if item not in self.source_map:
                         self.source_map[item] = "watchlist"
 
+        if self.should_stop:
+            logging.info("Operation stopped during media processing")
+            return
+
         # Run modify_file_paths on all collected paths to ensure consistent path format
         logging.debug("Finalizing media to cache list...")
         self.media_to_cache = self.file_path_modifier.modify_file_paths(list(modified_paths_set))
@@ -961,6 +1026,10 @@ class PlexCacheApp:
 
         # Log total media to cache
         logging.info(f"Total media to cache: {len(self.media_to_cache)} files")
+
+        if self.should_stop:
+            logging.info("Operation stopped during media processing")
+            return
 
         # Check for files that should be moved back to array (no longer needed in cache)
         # Only check if watched_move is enabled - otherwise files stay on cache indefinitely
@@ -1357,6 +1426,37 @@ class PlexCacheApp:
             readable = f"{min_free_bytes / (1024**3):.1f}GB"
             return (min_free_bytes, readable)
 
+    def _get_effective_plexcache_quota(self, cache_dir: str) -> tuple:
+        """Calculate effective plexcache quota in bytes, handling percentage-based values.
+
+        Args:
+            cache_dir: Path to the cache directory.
+
+        Returns:
+            Tuple of (quota_bytes, readable_str). Returns (0, None) if disabled.
+        """
+        quota_bytes = self.config_manager.cache.plexcache_quota_bytes
+
+        if quota_bytes == 0:
+            return (0, None)
+
+        if quota_bytes < 0:
+            # Negative value indicates percentage
+            percent = abs(quota_bytes)
+            try:
+                drive_size_override = self.config_manager.cache.cache_drive_size_bytes
+                disk_usage = get_disk_usage(cache_dir, drive_size_override)
+                total_drive_size = disk_usage.total
+                resolved_bytes = int(total_drive_size * percent / 100)
+                readable = f"{percent}% of {total_drive_size / (1024**3):.1f}GB = {resolved_bytes / (1024**3):.1f}GB"
+                return (resolved_bytes, readable)
+            except Exception as e:
+                logging.warning(f"Could not calculate cache drive size for plexcache_quota percentage: {e}")
+                return (0, None)
+        else:
+            readable = f"{quota_bytes / (1024**3):.1f}GB"
+            return (quota_bytes, readable)
+
     def _get_plexcache_tracked_size(self) -> tuple:
         """Calculate current PlexCache tracked size from exclude file.
 
@@ -1395,16 +1495,17 @@ class PlexCacheApp:
         return (plexcache_tracked, cached_files)
 
     def _apply_cache_limit(self, media_files: List[str], cache_dir: str) -> List[str]:
-        """Apply cache size limit and min free space, filtering out files that would exceed limits.
+        """Apply cache size limit, min free space, and plexcache quota, filtering out files that would exceed limits.
 
         Returns the list of files that fit within the most restrictive constraint.
         Files are prioritized in the order they appear (OnDeck items should come first).
         """
         cache_limit_bytes, limit_readable = self._get_effective_cache_limit(cache_dir)
         min_free_bytes, min_free_readable = self._get_effective_min_free_space(cache_dir)
+        plexcache_quota_bytes, quota_readable = self._get_effective_plexcache_quota(cache_dir)
 
         # No constraints set
-        if cache_limit_bytes == 0 and min_free_bytes == 0:
+        if cache_limit_bytes == 0 and min_free_bytes == 0 and plexcache_quota_bytes == 0:
             return media_files
 
         # Get total cache drive usage (use manual override if configured)
@@ -1421,6 +1522,8 @@ class PlexCacheApp:
             logging.info(f"Cache limit: {limit_readable}")
         if min_free_bytes > 0:
             logging.info(f"Min free space: {min_free_readable}")
+        if plexcache_quota_bytes > 0:
+            logging.info(f"PlexCache quota: {quota_readable}")
         logging.info(f"Cache drive usage: {drive_usage_gb:.2f}GB (free: {disk_usage.free / (1024**3):.2f}GB)")
 
         # Calculate available space from each constraint
@@ -1438,16 +1541,28 @@ class PlexCacheApp:
                 available_space = min_free_available
                 bottleneck = "min_free_space"
 
+        # PlexCache quota constraint (only counts tracked files, not all drive usage)
+        if plexcache_quota_bytes > 0:
+            plexcache_tracked, _ = self._get_plexcache_tracked_size()
+            quota_available = plexcache_quota_bytes - plexcache_tracked
+            logging.info(f"PlexCache quota: {plexcache_quota_bytes / (1024**3):.1f}GB (tracked: {plexcache_tracked / (1024**3):.2f}GB, available: {quota_available / (1024**3):.2f}GB)")
+            if available_space is None or quota_available < available_space:
+                available_space = quota_available
+                bottleneck = "plexcache_quota"
+
         if available_space is None:
             return media_files
 
-        # Log which constraint is the bottleneck when both are active
-        if cache_limit_bytes > 0 and min_free_bytes > 0:
+        # Log which constraint is the bottleneck when multiple are active
+        active_count = sum(1 for v in [cache_limit_bytes, min_free_bytes, plexcache_quota_bytes] if v > 0)
+        if active_count > 1:
             logging.info(f"Active constraint: {bottleneck.replace('_', ' ')} (available: {available_space / (1024**3):.2f}GB)")
 
         if available_space <= 0:
             if bottleneck == "min_free_space":
                 logging.warning(f"Drive free space ({disk_usage.free / (1024**3):.2f}GB) is at or below min free space floor ({min_free_readable})")
+            elif bottleneck == "plexcache_quota":
+                logging.warning(f"PlexCache quota reached ({plexcache_tracked / (1024**3):.2f}GB tracked, quota is {quota_readable})")
             else:
                 logging.warning(f"Cache drive already at or over limit ({drive_usage_gb:.2f}GB used, limit is {limit_readable})")
             return []
@@ -1477,7 +1592,8 @@ class PlexCacheApp:
 
         if skipped_count > 0:
             skipped_gb = skipped_size / (1024**3)
-            logging.warning(f"Cache limit reached: skipped {skipped_count} files ({skipped_gb:.2f}GB) that would exceed the {limit_readable} limit")
+            constraint_name = quota_readable if bottleneck == "plexcache_quota" else (min_free_readable if bottleneck == "min_free_space" else limit_readable)
+            logging.warning(f"Cache limit reached: skipped {skipped_count} files ({skipped_gb:.2f}GB) that would exceed the {constraint_name} limit")
 
         return files_to_cache
 
@@ -1974,7 +2090,17 @@ class PlexCacheApp:
             media_files_filtered = self._apply_cache_limit(media_files_filtered, cache_dir)
 
         total_size, total_size_unit = self.file_utils.get_total_size_of_files(media_files_filtered)
-        
+
+        # Fallback for array moves: on non-FUSE setups (e.g., ZFS with direct pool paths),
+        # array paths don't exist because originals were renamed to .plexcached.
+        # Standard Unraid masks this because /mnt/user/ FUSE shows cache copies at array paths.
+        # Use pre-computed sizes from _log_restore_and_move_summary() which correctly
+        # sizes from .plexcached files and cache copies — paths that actually exist.
+        if destination == 'array' and total_size == 0 and media_files_filtered:
+            fallback_bytes = getattr(self, 'restored_bytes', 0) + getattr(self, 'moved_to_array_bytes', 0)
+            if fallback_bytes > 0:
+                total_size, total_size_unit = self.file_utils._convert_bytes_to_readable_size(fallback_bytes)
+
         if total_size > 0:
             logging.debug(f"Moving {total_size:.2f} {total_size_unit} to {destination}")
             # Generate summary message with restore vs move separation for array moves

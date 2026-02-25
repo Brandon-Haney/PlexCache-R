@@ -3,14 +3,16 @@
  *
  * Self-attaches to all elements with class="path-browse-input".
  * Fetches directory listings from GET /api/browse?path=...
- * Re-initializes on htmx:afterSwap to survive HTMX partial swaps.
+ * Re-initializes on htmx:afterSwap and <details> toggle to survive
+ * HTMX partial swaps and lazy-revealed form sections.
  *
  * Uses `var` (not const) to survive HTMX re-declarations per project convention.
  */
 var PathBrowser = PathBrowser || {
     _debounceTimers: new WeakMap(),
     _dropdowns: new WeakMap(),
-    DEBOUNCE_MS: 300,
+    _lastResults: new WeakMap(),
+    DEBOUNCE_MS: 150,
     MAX_VISIBLE: 20,
 
     init: function() {
@@ -40,6 +42,42 @@ var PathBrowser = PathBrowser || {
             PathBrowser._debounce(input, function() {
                 PathBrowser._onInput(input);
             });
+        });
+
+        // Re-show dropdown on focus if we have cached results
+        input.addEventListener('focus', function() {
+            var last = PathBrowser._lastResults.get(input);
+            if (last && input.value) {
+                // Re-compute what to show based on current value
+                var value = input.value;
+                var browsePath, filterPrefix;
+                if (value.endsWith('/')) {
+                    browsePath = value;
+                    filterPrefix = '';
+                } else {
+                    var lastSlash = value.lastIndexOf('/');
+                    browsePath = value.substring(0, lastSlash + 1);
+                    filterPrefix = value.substring(lastSlash + 1).toLowerCase();
+                }
+
+                if (last.basePath === browsePath) {
+                    var dirs = last.directories;
+                    if (filterPrefix) {
+                        dirs = dirs.filter(function(d) {
+                            return d.toLowerCase().startsWith(filterPrefix);
+                        });
+                    }
+                    if (dirs.length > 0) {
+                        PathBrowser._show(input, browsePath, dirs.slice(0, PathBrowser.MAX_VISIBLE));
+                        return;
+                    }
+                }
+                // Cache miss — fetch fresh
+                PathBrowser._onInput(input);
+            } else if (input.value && input.value.startsWith('/')) {
+                // No cache, but has a value — fetch
+                PathBrowser._onInput(input);
+            }
         });
 
         // Keyboard navigation
@@ -101,6 +139,23 @@ var PathBrowser = PathBrowser || {
             return;
         }
 
+        // Check if we already have cached results for this base path
+        var last = PathBrowser._lastResults.get(input);
+        if (last && last.basePath === browsePath) {
+            var dirs = last.directories;
+            if (filterPrefix) {
+                dirs = dirs.filter(function(d) {
+                    return d.toLowerCase().startsWith(filterPrefix);
+                });
+            }
+            if (dirs.length === 0) {
+                PathBrowser._hide(input);
+            } else {
+                PathBrowser._show(input, browsePath, dirs.slice(0, PathBrowser.MAX_VISIBLE));
+            }
+            return;
+        }
+
         fetch('/api/browse?path=' + encodeURIComponent(browsePath))
             .then(function(response) {
                 if (!response.ok) {
@@ -114,6 +169,12 @@ var PathBrowser = PathBrowser || {
                     PathBrowser._hide(input);
                     return;
                 }
+
+                // Cache the full result set for this base path
+                PathBrowser._lastResults.set(input, {
+                    basePath: browsePath,
+                    directories: data.directories
+                });
 
                 var dirs = data.directories;
                 if (filterPrefix) {
@@ -146,6 +207,8 @@ var PathBrowser = PathBrowser || {
             item.addEventListener('mousedown', function(e) {
                 e.preventDefault(); // Prevent blur
                 input.value = basePath + dir + '/';
+                // Clear cache so next input triggers a fresh fetch for the new directory
+                PathBrowser._lastResults.delete(input);
                 PathBrowser._hide(input);
                 // Trigger input event to re-fetch
                 input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -193,3 +256,10 @@ document.addEventListener('DOMContentLoaded', function() {
 document.addEventListener('htmx:afterSwap', function() {
     PathBrowser.init();
 });
+
+// Re-initialize when <details> elements are toggled open (lazy-revealed forms)
+document.addEventListener('toggle', function(e) {
+    if (e.target.open) {
+        PathBrowser.init();
+    }
+}, true);

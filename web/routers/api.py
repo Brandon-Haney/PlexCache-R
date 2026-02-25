@@ -654,7 +654,8 @@ def browse_directory(path: str = Query("")):
         return JSONResponse({"error": "invalid path"}, status_code=400)
 
     # Post-resolve jail check (catches ../ traversal and symlink escapes)
-    if not str(resolved).startswith("/mnt/"):
+    resolved_str = str(resolved)
+    if resolved_str != "/mnt" and not resolved_str.startswith("/mnt/"):
         return JSONResponse({"error": "path must be under /mnt/"}, status_code=403)
 
     if not resolved.is_dir():

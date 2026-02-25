@@ -114,6 +114,8 @@
         if (editPanel.style.display === 'none') {
             editPanel.style.display = 'block';
         } else {
+            // Reset all forms to original values before hiding
+            editPanel.querySelectorAll('form').forEach(function(form) { form.reset(); });
             editPanel.style.display = 'none';
         }
         lucide.createIcons();

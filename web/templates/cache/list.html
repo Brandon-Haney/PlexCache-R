@@ -494,43 +494,57 @@ function executeEvict() {
     actionBtn.innerHTML = '<span class="spinner" style="width: 16px; height: 16px; margin-right: 8px;"></span>Evicting...';
     cancelBtn.disabled = true;
 
-    // Determine endpoint based on single vs bulk
-    const isBulk = pendingEvictPaths.length > 1;
-    let fetchPromise;
+    // Always use maintenance runner endpoint (handles single + bulk)
+    const formData = new FormData();
+    pendingEvictPaths.forEach(path => formData.append('paths', path));
 
-    if (isBulk) {
-        const formData = new FormData();
-        pendingEvictPaths.forEach(path => formData.append('paths', path));
-        fetchPromise = fetch('/api/cache/evict-bulk', {
-            method: 'POST',
-            body: formData
-        });
-    } else {
-        fetchPromise = fetch(`/api/cache/evict/${encodeURIComponent(pendingEvictPaths[0])}`, {
-            method: 'POST'
-        });
-    }
-
-    fetchPromise
+    fetch('/maintenance/evict-files', {
+        method: 'POST',
+        body: formData
+    })
         .then(response => response.text())
         .then(html => {
             closeEvictModal();
             const container = document.getElementById('alert-container');
-            container.innerHTML = html;
-            lucide.createIcons();
-            container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            if (html.includes('maintenance-action-blocked')) {
+                // Blocked — show warning in banner if available
+                var tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                var msgSpan = tempDiv.querySelector('span');
+                var message = msgSpan ? msgSpan.textContent : 'Action is blocked by a running operation.';
+                if (typeof showBannerWarning === 'function') {
+                    showBannerWarning(message);
+                } else {
+                    container.innerHTML = html;
+                    lucide.createIcons();
+                }
+            } else if (html.includes('maintenance-action-queued')) {
+                // Queued — show brief alert
+                container.innerHTML = html;
+                lucide.createIcons();
+                setTimeout(() => { if (container.firstChild) container.innerHTML = ''; }, 5000);
+            } else if (html.includes('maintenance-async-started')) {
+                // Started in background — force banner poll
+                htmx.ajax('GET', '/api/operation-banner', {target: '#global-operation-banner', swap: 'innerHTML'});
+            }
+
+            // Reset checkboxes for bulk eviction
+            document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
+            var selectAll = document.getElementById('select-all');
+            if (selectAll) selectAll.checked = false;
+            updateBulkActions();
         })
         .catch(err => {
             closeEvictModal();
             const container = document.getElementById('alert-container');
             container.innerHTML = `
-                <div class="alert alert-error alert-auto-dismiss">
+                <div class="alert alert-error">
                     <i data-lucide="alert-circle"></i>
                     <span>Error: ${err.message}</span>
                 </div>
             `;
             lucide.createIcons();
-            container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         })
         .finally(() => {
             // Reset button state
@@ -564,6 +578,13 @@ document.addEventListener('htmx:afterSwap', function(e) {
         updateBulkActions();
         const selectAll = document.getElementById('select-all');
         if (selectAll) selectAll.checked = false;
+    }
+    // Auto-refresh cache table when banner shows eviction completed
+    if (e.detail.target.id === 'global-operation-banner') {
+        var banner = e.detail.target;
+        if (banner.querySelector('.di-completed') && banner.innerHTML.includes('Evict from Cache')) {
+            htmx.trigger('#cache-table-body', 'refresh');
+        }
     }
 });
 </script>

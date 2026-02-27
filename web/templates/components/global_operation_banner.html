@@ -1106,7 +1106,7 @@ function dismissCompletionBanner() {
 
 {% else %}
 {# ═══════════════════════════════════════════════════════════
-   IDLE — Dim gold countdown pill or silent poller
+   IDLE — Countdown pill (scheduled) or "Ready" pill (no schedule)
    ═══════════════════════════════════════════════════════════ #}
 {% if scheduler_status is defined and scheduler_status and scheduler_status.next_run_relative %}
 <div class="di-pill di-pill--idle" id="idle-countdown-pill" data-state="idle"
@@ -1192,6 +1192,70 @@ function diTriggerRun(dryRun) {
 }
 </script>
 {% else %}
-<div hx-get="/api/operation-banner" hx-trigger="every 10s" hx-swap="innerHTML" hx-target="#global-operation-banner"></div>
+{# ── No schedule configured — persistent "Ready" pill with quick actions ── #}
+<div class="di-pill di-pill--idle" id="idle-ready-pill" data-state="idle-ready"
+     hx-get="/api/operation-banner" hx-trigger="every 30s" hx-swap="innerHTML" hx-target="#global-operation-banner"
+     onmouseenter="diHoverIn()" onmouseleave="diHoverOut()" onclick="diPillClick()">
+
+    <!-- Compact view -->
+    <div class="di-pill__compact">
+        <div class="di-pill__left">
+            <i data-lucide="play" style="width: 13px; height: 13px; color: #e5a00d; opacity: 0.6;"></i>
+            <span style="font-size: 0.78rem; color: rgba(255,255,255,0.5);">PlexCache</span>
+        </div>
+    </div>
+
+    <!-- Expanded view — quick actions -->
+    <div class="di-pill__expanded">
+        <div class="di-expanded__header">
+            <div class="di-expanded__header-left">
+                <div class="di-icon" style="background: rgba(229,160,13,0.15); color: #e5a00d;"><i data-lucide="play" style="width: 14px; height: 14px;"></i></div>
+                <span class="di-label">PlexCache Ready</span>
+            </div>
+        </div>
+        <div class="di-idle-actions">
+            <label class="di-verbose-toggle" onclick="event.stopPropagation();">
+                <input type="checkbox" id="di-verbose-cb"
+                       onchange="localStorage.setItem('verbose_mode', this.checked);">
+                <span>Verbose</span>
+            </label>
+            <button class="di-btn di-btn--primary" title="Run Now"
+                    onclick="event.stopPropagation(); diTriggerRun(false);">
+                <i data-lucide="play" style="width: 14px; height: 14px;"></i>
+                Run Now
+            </button>
+            <button class="di-btn di-btn--secondary" title="Dry Run"
+                    onclick="event.stopPropagation(); diTriggerRun(true);">
+                <i data-lucide="eye" style="width: 14px; height: 14px;"></i>
+                Dry Run
+            </button>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    if (window.BannerLogStream) BannerLogStream.disconnect();
+    // Restore verbose preference
+    var vcb = document.getElementById('di-verbose-cb');
+    if (vcb && localStorage.getItem('verbose_mode') === 'true') vcb.checked = true;
+    lucide.createIcons();
+})();
+
+function diTriggerRun(dryRun) {
+    var verbose = document.getElementById('di-verbose-cb');
+    var formData = new FormData();
+    if (verbose && verbose.checked) formData.append('verbose', 'true');
+    if (dryRun) formData.append('dry_run', 'true');
+    sessionStorage.removeItem('plexcache_nextrun_dismissed');
+    diSetExpandState('false');
+    fetch('/operations/run', { method: 'POST', body: formData })
+        .then(function(resp) { return resp.text(); })
+        .then(function(html) {
+            document.getElementById('global-operation-banner').innerHTML = html;
+            htmx.process(document.getElementById('global-operation-banner'));
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        });
+}
+</script>
 {% endif %}
 {% endif %}

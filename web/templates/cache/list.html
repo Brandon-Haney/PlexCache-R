@@ -525,7 +525,10 @@ function executeEvict() {
                 lucide.createIcons();
                 setTimeout(() => { if (container.firstChild) container.innerHTML = ''; }, 5000);
             } else if (html.includes('maintenance-async-started')) {
-                // Started in background — force banner poll
+                // Started in background — show brief alert + force banner poll
+                container.innerHTML = html;
+                lucide.createIcons();
+                setTimeout(() => { if (container.firstChild) container.innerHTML = ''; }, 5000);
                 htmx.ajax('GET', '/api/operation-banner', {target: '#global-operation-banner', swap: 'innerHTML'});
             }
 

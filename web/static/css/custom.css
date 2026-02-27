@@ -1039,6 +1039,151 @@ footer {
     gap: 0.5rem;
 }
 
+/* ── Light theme pill overrides ──────────────────────── */
+
+/* Accent colors — slightly darker for white-bg readability */
+[data-theme="light"] .di-pill--caching   { --accent: #34a853; --accent-dim: rgba(52,168,83,0.12);  --accent-glow: rgba(52,168,83,0.08); }
+[data-theme="light"] .di-pill--evicting  { --accent: #e07800; --accent-dim: rgba(224,120,0,0.12);  --accent-glow: rgba(224,120,0,0.08); }
+[data-theme="light"] .di-pill--maintenance { --accent: #0a84ff; --accent-dim: rgba(10,132,255,0.10); --accent-glow: rgba(10,132,255,0.06); }
+[data-theme="light"] .di-pill--error     { --accent: #d70015; --accent-dim: rgba(215,0,21,0.10);   --accent-glow: rgba(215,0,21,0.06); }
+[data-theme="light"] .di-pill--dry-run   { --accent: #b8860b; --accent-dim: rgba(184,134,11,0.12); --accent-glow: rgba(184,134,11,0.08); }
+[data-theme="light"] .di-pill--completed { --accent: #34a853; --accent-dim: rgba(52,168,83,0.12);  --accent-glow: rgba(52,168,83,0.08); }
+[data-theme="light"] .di-pill--completed-errors { --accent: #e07800; --accent-dim: rgba(224,120,0,0.12); --accent-glow: rgba(224,120,0,0.08); }
+[data-theme="light"] .di-pill--idle      { --accent: #b8860b; --accent-dim: rgba(184,134,11,0.08); --accent-glow: rgba(184,134,11,0.05); }
+
+/* White pill surface */
+[data-theme="light"] .di-pill {
+    background: #ffffff;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06);
+}
+
+/* Labels, metrics, text */
+[data-theme="light"] .di-label { color: #1c1c1e; }
+[data-theme="light"] .di-metric--muted { color: rgba(0,0,0,0.65); }
+
+/* Spinner second-color uses accent-dim (already via var), no override needed */
+
+/* Progress bar track */
+[data-theme="light"] .di-progress-track { background: rgba(0,0,0,0.08); }
+
+/* Progress meta */
+[data-theme="light"] .di-progress-meta { color: rgba(0,0,0,0.65); }
+[data-theme="light"] .di-progress-meta .di-progress-meta__right { color: rgba(0,0,0,0.65); }
+
+/* Divider */
+[data-theme="light"] .di-divider { background: rgba(0,0,0,0.08); }
+
+/* File rows — stronger contrast for readability */
+[data-theme="light"] .di-file-row { color: rgba(0,0,0,0.55); }
+[data-theme="light"] .di-file-row--active .di-file-row__name { color: rgba(0,0,0,0.75); }
+[data-theme="light"] .di-file-row__size { color: rgba(0,0,0,0.5); }
+
+/* Action tags */
+[data-theme="light"] .di-action-tag--active {
+    background: rgba(10,132,255,0.08);
+    color: #0a84ff;
+}
+[data-theme="light"] .di-action-tag--cached {
+    background: rgba(52,168,83,0.08);
+    color: #34a853;
+}
+[data-theme="light"] .di-action-tag--restored {
+    background: rgba(224,120,0,0.08);
+    color: #e07800;
+}
+[data-theme="light"] .di-action-tag--queued {
+    background: rgba(10,132,255,0.06);
+    color: rgba(10,132,255,0.5);
+}
+
+/* Summary stats */
+[data-theme="light"] .di-summary-stats__cached { color: #34a853; }
+[data-theme="light"] .di-summary-stats__restored { color: #e07800; }
+[data-theme="light"] .di-summary-stats__muted { color: rgba(0,0,0,0.5); }
+
+/* Buttons */
+[data-theme="light"] .di-dismiss {
+    background: rgba(0,0,0,0.05);
+    color: rgba(0,0,0,0.5);
+}
+[data-theme="light"] .di-dismiss:hover {
+    background: rgba(0,0,0,0.10);
+    color: #1c1c1e;
+}
+[data-theme="light"] .di-btn--secondary {
+    background: rgba(0,0,0,0.04);
+    color: rgba(0,0,0,0.6);
+    border-color: rgba(0,0,0,0.12);
+}
+[data-theme="light"] .di-btn--secondary:hover {
+    background: rgba(0,0,0,0.08);
+    color: #1c1c1e;
+}
+
+/* Verbose toggle */
+[data-theme="light"] .di-verbose-toggle { color: rgba(0,0,0,0.65); }
+
+/* Expand hint */
+[data-theme="light"] .di-expand-hint { color: rgba(0,0,0,0.5); }
+
+/* More-files link */
+[data-theme="light"] .di-more-files { color: rgba(0,0,0,0.5); }
+
+/* Queue badge */
+[data-theme="light"] .di-queue-badge {
+    background: rgba(10,132,255,0.08);
+    color: #0a84ff;
+}
+
+/* Queue section */
+[data-theme="light"] .di-queue-header__label { color: rgba(0,0,0,0.5); }
+[data-theme="light"] .di-queue-header__clear {
+    background: rgba(0,0,0,0.04);
+    color: rgba(0,0,0,0.5);
+}
+[data-theme="light"] .di-queue-header__clear:hover {
+    background: rgba(215,0,21,0.08);
+    color: #d70015;
+}
+[data-theme="light"] .di-queue-item { color: rgba(0,0,0,0.55); }
+[data-theme="light"] .di-queue-item__count { color: rgba(0,0,0,0.5); }
+[data-theme="light"] .di-queue-item__remove { color: rgba(0,0,0,0.15); }
+[data-theme="light"] .di-queue-item__remove:hover {
+    background: rgba(215,0,21,0.08);
+    color: #d70015;
+}
+
+/* Countdown */
+[data-theme="light"] .di-countdown__text { color: rgba(0,0,0,0.65); }
+
+/* Expanded pill border */
+[data-theme="light"] .di-pill.di-expanded,
+[data-theme="light"] #global-operation-banner[data-di-expanded="tier2"] .di-pill,
+[data-theme="light"] #global-operation-banner[data-di-expanded="tier3"] .di-pill {
+    border-color: rgba(0,0,0,0.08) !important;
+}
+
+/* Border overrides for variant pills */
+[data-theme="light"] .di-pill--dry-run { border-color: rgba(184,134,11,0.25); }
+[data-theme="light"] .di-pill--completed { border-color: rgba(52,168,83,0.25); }
+[data-theme="light"] .di-pill--completed-errors { border-color: rgba(224,120,0,0.25); }
+[data-theme="light"] .di-pill--error { border-color: rgba(215,0,21,0.2); }
+
+/* Completion flash — lighter shadow base for light mode */
+[data-theme="light"] .di-pill--completed,
+[data-theme="light"] .di-pill--completed-errors {
+    animation-name: diCompleteFlashLight;
+}
+@keyframes diCompleteFlashLight {
+    0%   { box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06), 0 0 0 0 var(--accent-glow); }
+    50%  { box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06), 0 0 12px 4px var(--accent-glow); }
+    100% { box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06), 0 0 0 0 var(--accent-glow); }
+}
+
+/* Log lines in detail panel */
+[data-theme="light"] .di-log-lines,
+[data-theme="light"] #di-log-lines .di-file-row { color: rgba(0,0,0,0.65); }
+
 /* ── Mobile responsive ───────────────────────────────── */
 @media (max-width: 768px) {
     #global-operation-banner {

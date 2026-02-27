@@ -21,7 +21,7 @@
 </header>
 
 <!-- Alert container for eviction messages -->
-<div id="alert-container"></div>
+<div id="cache-alert-container"></div>
 
 <!-- Filters -->
 <div class="card mb-2">
@@ -505,7 +505,7 @@ function executeEvict() {
         .then(response => response.text())
         .then(html => {
             closeEvictModal();
-            const container = document.getElementById('alert-container');
+            const container = document.getElementById('cache-alert-container');
 
             if (html.includes('maintenance-action-blocked')) {
                 // Blocked — show warning in banner if available
@@ -540,7 +540,7 @@ function executeEvict() {
         })
         .catch(err => {
             closeEvictModal();
-            const container = document.getElementById('alert-container');
+            const container = document.getElementById('cache-alert-container');
             container.innerHTML = `
                 <div class="alert alert-error">
                     <i data-lucide="alert-circle"></i>

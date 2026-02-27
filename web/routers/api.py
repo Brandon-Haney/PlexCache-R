@@ -561,9 +561,9 @@ def get_operation_banner(request: Request):
     if not operation_runner.is_running and not get_maintenance_runner().is_running:
         scheduler_service = get_scheduler_service()
         sched_status = scheduler_service.get_status()
-        if sched_status.get("enabled") and sched_status.get("next_run_relative"):
+        if sched_status.get("enabled"):
             context["scheduler_status"] = {
-                "next_run_relative": sched_status["next_run_relative"],
+                "next_run_relative": sched_status.get("next_run_relative") or "momentarily",
                 "next_run_display": sched_status.get("next_run_display", ""),
             }
 

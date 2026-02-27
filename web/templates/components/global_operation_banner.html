@@ -1121,8 +1121,6 @@ function dismissCompletionBanner() {
         </div>
         <div class="di-pill__right">
             <span class="di-metric" style="color: rgba(229,160,13,0.7); font-weight: 400; font-size: 0.8rem;">{{ scheduler_status.next_run_relative }}</span>
-            <button class="di-dismiss" style="width: 22px; height: 22px; font-size: 0.8rem;" title="Dismiss"
-                    onclick="event.stopPropagation(); sessionStorage.setItem('plexcache_nextrun_dismissed','1'); document.getElementById('global-operation-banner').innerHTML='<div hx-get=/api/operation-banner hx-trigger=every\\ 30s hx-swap=innerHTML hx-target=#global-operation-banner></div>'; htmx.process(document.getElementById('global-operation-banner'));">&times;</button>
         </div>
     </div>
 
@@ -1132,10 +1130,6 @@ function dismissCompletionBanner() {
             <div class="di-expanded__header-left">
                 <div class="di-icon" style="background: rgba(229,160,13,0.15); color: #e5a00d;"><i data-lucide="clock" style="width: 14px; height: 14px;"></i></div>
                 <span class="di-label">Next run in {{ scheduler_status.next_run_relative }}</span>
-            </div>
-            <div class="di-expanded__header-right">
-                <button class="di-dismiss" style="width: 22px; height: 22px; font-size: 0.8rem;" title="Dismiss"
-                        onclick="event.stopPropagation(); sessionStorage.setItem('plexcache_nextrun_dismissed','1'); diSetExpandState('false'); document.getElementById('global-operation-banner').innerHTML='<div hx-get=/api/operation-banner hx-trigger=every\\ 30s hx-swap=innerHTML hx-target=#global-operation-banner></div>'; htmx.process(document.getElementById('global-operation-banner'));">&times;</button>
             </div>
         </div>
         <div class="di-idle-actions">
@@ -1160,14 +1154,6 @@ function dismissCompletionBanner() {
 <script>
 (function() {
     if (window.BannerLogStream) BannerLogStream.disconnect();
-    // If user dismissed the countdown this session, remove the pill and fall back to silent polling
-    if (sessionStorage.getItem('plexcache_nextrun_dismissed')) {
-        diSetExpandState('false');
-        document.getElementById('global-operation-banner').innerHTML =
-            '<div hx-get="/api/operation-banner" hx-trigger="every 30s" hx-swap="innerHTML" hx-target="#global-operation-banner"></div>';
-        htmx.process(document.getElementById('global-operation-banner'));
-        return;
-    }
     // Restore verbose preference
     var vcb = document.getElementById('di-verbose-cb');
     if (vcb && localStorage.getItem('verbose_mode') === 'true') vcb.checked = true;
@@ -1179,8 +1165,6 @@ function diTriggerRun(dryRun) {
     var formData = new FormData();
     if (verbose && verbose.checked) formData.append('verbose', 'true');
     if (dryRun) formData.append('dry_run', 'true');
-    // Clear dismissed state so running pill shows
-    sessionStorage.removeItem('plexcache_nextrun_dismissed');
     diSetExpandState('false');
     fetch('/operations/run', { method: 'POST', body: formData })
         .then(function(resp) { return resp.text(); })

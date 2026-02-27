@@ -527,7 +527,7 @@ footer {
 
 /* Running pills use a fixed width in compact mode to prevent jumpiness
    as content changes (phase labels, counts, durations) every 2s poll */
-.di-glow { width: 360px; min-width: 360px; }
+.di-glow { width: 360px; min-width: 360px; border: 1.5px solid var(--accent-dim, rgba(255,255,255,0.12)); }
 
 /* Subtle animated glow behind running pills — compact state only */
 .di-glow::after {

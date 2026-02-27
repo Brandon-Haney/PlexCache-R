@@ -559,6 +559,22 @@ footer {
     width: 100%;
 }
 
+/* Subtle expand-hint chevron on compact pill */
+.di-pill__compact::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-right: 1.5px solid rgba(255,255,255,0.2);
+    border-bottom: 1.5px solid rgba(255,255,255,0.2);
+    transform: rotate(45deg);
+    flex-shrink: 0;
+    margin-top: -2px;
+    transition: opacity 0.2s ease;
+}
+.di-pill:hover .di-pill__compact::after {
+    border-color: rgba(255,255,255,0.45);
+}
+
 /* Pill layout sections */
 .di-pill__left, .di-pill__right {
     display: flex;

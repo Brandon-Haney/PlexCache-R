@@ -416,6 +416,21 @@ document.addEventListener('htmx:afterSwap', function(evt) {
 {# ═══════════════════════════════════════════════════════════
    MAINTENANCE COMPLETED — Green or orange pill
    ═══════════════════════════════════════════════════════════ #}
+{# Placeholder pill prevents empty flash while JS builds the real one #}
+{% set maint_comp_color = 'completed-errors' if maint_status.errors is defined and maint_status.errors|length > 0 else 'completed' %}
+<div class="di-pill di-pill--{{ maint_comp_color }}" data-state="maint-completed"
+     hx-get="/api/operation-banner" hx-trigger="every 10s" hx-swap="innerHTML" hx-target="#global-operation-banner">
+    <div class="di-pill__compact">
+        <div class="di-pill__left">
+            <div class="di-icon"><i data-lucide="{{ 'alert-triangle' if maint_comp_color == 'completed-errors' else 'check' }}" style="width: 14px; height: 14px;"></i></div>
+            <span class="di-label">Maintenance Complete</span>
+        </div>
+        <div class="di-pill__right">
+            <span class="di-metric--muted">{{ maint_status.result_message|default('Action completed')|truncate(35, True, '...') }}</span>
+            <span class="di-metric" style="font-size: 0.78rem;">{{ maint_status.elapsed_display|default('') }}</span>
+        </div>
+    </div>
+</div>
 <script>
 (function() {
     var completionKey = 'plexcache_last_maint_completion_shown';
@@ -752,6 +767,20 @@ function dismissMaintCompletionBanner() {
 {# ═══════════════════════════════════════════════════════════
    OPERATION COMPLETED — Green pill (or orange if errors)
    ═══════════════════════════════════════════════════════════ #}
+{# Placeholder pill prevents empty flash while JS builds the real one #}
+{% set op_comp_color = 'completed-errors' if status.error_count is defined and status.error_count > 0 else 'completed' %}
+<div class="di-pill di-pill--{{ op_comp_color }}" data-state="op-completed"
+     hx-get="/api/operation-banner" hx-trigger="every 10s" hx-swap="innerHTML" hx-target="#global-operation-banner">
+    <div class="di-pill__compact">
+        <div class="di-pill__left">
+            <div class="di-icon"><i data-lucide="{{ 'alert-triangle' if op_comp_color == 'completed-errors' else 'check' }}" style="width: 14px; height: 14px;"></i></div>
+            <span class="di-label">{{ 'Dry Run Complete' if status.dry_run else 'Completed' }}</span>
+        </div>
+        <div class="di-pill__right">
+            <span class="di-metric" style="font-size: 0.78rem;">{{ status.duration_display|default('') }}</span>
+        </div>
+    </div>
+</div>
 <script>
 (function() {
     if (window.BannerLogStream) BannerLogStream.disconnect();

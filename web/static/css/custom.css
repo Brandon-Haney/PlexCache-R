@@ -619,6 +619,10 @@ footer {
     color: rgba(255,255,255,0.5);
     font-weight: 400;
     font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
 }
 
 /* Accent-colored spinner */

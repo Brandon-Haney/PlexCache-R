@@ -20,6 +20,9 @@
     </div>
 </header>
 
+<!-- Alert container for eviction messages -->
+<div id="alert-container"></div>
+
 <!-- Filters -->
 <div class="card mb-2">
     <div class="card-body">
@@ -64,9 +67,6 @@
         <input type="hidden" id="dir-input" name="dir" value="{{ sort_dir|default('desc') }}" class="cache-filter">
     </div>
 </div>
-
-<!-- Alert container for eviction messages -->
-<div id="alert-container"></div>
 
 <!-- Cache Table -->
 <div class="card">

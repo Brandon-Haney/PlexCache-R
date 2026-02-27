@@ -768,13 +768,14 @@ function dismissMaintCompletionBanner() {
    OPERATION COMPLETED — Green pill (or orange if errors)
    ═══════════════════════════════════════════════════════════ #}
 {# Placeholder pill prevents empty flash while JS builds the real one #}
-{% set op_comp_color = 'completed-errors' if status.error_count is defined and status.error_count > 0 else 'completed' %}
+{% set op_was_stopped = status.was_stopped|default(false) %}
+{% set op_comp_color = 'completed-errors' if (status.error_count is defined and status.error_count > 0) or op_was_stopped else 'completed' %}
 <div class="di-pill di-pill--{{ op_comp_color }}" data-state="op-completed"
      hx-get="/api/operation-banner" hx-trigger="every 10s" hx-swap="innerHTML" hx-target="#global-operation-banner">
     <div class="di-pill__compact">
         <div class="di-pill__left">
-            <div class="di-icon"><i data-lucide="{{ 'alert-triangle' if op_comp_color == 'completed-errors' else 'check' }}" style="width: 14px; height: 14px;"></i></div>
-            <span class="di-label">{{ 'Dry Run Complete' if status.dry_run else 'Completed' }}</span>
+            <div class="di-icon"><i data-lucide="{{ 'square' if op_was_stopped else ('alert-triangle' if op_comp_color == 'completed-errors' else 'check') }}" style="width: 14px; height: 14px;"></i></div>
+            <span class="di-label">{{ 'Stopped' if op_was_stopped else ('Dry Run Complete' if status.dry_run else 'Completed') }}</span>
         </div>
         <div class="di-pill__right">
             <span class="di-metric" style="font-size: 0.78rem;">{{ status.duration_display|default('') }}</span>
@@ -796,17 +797,19 @@ function dismissMaintCompletionBanner() {
     var durationDisplay = '{{ status.duration_display|default(status.duration_seconds ~ "s") }}';
     var errorCount = {{ status.error_count|default(0) }};
     var isDryRun = {{ 'true' if status.dry_run else 'false' }};
+    var wasStopped = {{ 'true' if status.was_stopped else 'false' }};
 
     // Compact summary
     var summaryParts = [];
+    if (wasStopped) summaryParts.push('Stopped by user');
     if (filesCached > 0) summaryParts.push(filesCached + ' cached');
     if (filesRestored > 0) summaryParts.push(filesRestored + ' restored');
-    if (filesCached === 0 && filesRestored === 0) summaryParts.push('No files processed');
+    if (!wasStopped && filesCached === 0 && filesRestored === 0) summaryParts.push('No files processed');
     var compactSummary = summaryParts.join(' · ');
 
-    var colorMod = errorCount > 0 ? 'completed-errors' : 'completed';
-    var iconName = errorCount > 0 ? 'alert-triangle' : 'check';
-    var labelText = isDryRun ? 'Dry Run Complete' : 'Completed';
+    var colorMod = (errorCount > 0 || wasStopped) ? 'completed-errors' : 'completed';
+    var iconName = wasStopped ? 'square' : (errorCount > 0 ? 'alert-triangle' : 'check');
+    var labelText = wasStopped ? 'Stopped' : (isDryRun ? 'Dry Run Complete' : 'Completed');
     var errorBadge = errorCount > 0 ? '<span class="di-error-badge">' + errorCount + ' error' + (errorCount !== 1 ? 's' : '') + '</span>' : '';
 
     // Expanded summary stats
@@ -871,7 +874,7 @@ function dismissMaintCompletionBanner() {
                 <div class="di-expanded__header">
                     <div class="di-expanded__header-left">
                         <div class="di-icon"><i data-lucide="${iconName}" style="width: 14px; height: 14px;"></i></div>
-                        <span class="di-label">${isDryRun ? 'Dry Run' : 'Operation'} Completed</span>
+                        <span class="di-label">${wasStopped ? 'Operation Stopped' : (isDryRun ? 'Dry Run' : 'Operation') + ' Completed'}</span>
                         ${errorBadge}
                         <span class="di-metric--muted">${durationDisplay}</span>
                     </div>

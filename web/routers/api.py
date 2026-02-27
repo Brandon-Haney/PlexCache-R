@@ -290,6 +290,7 @@ async def save_schedule_settings(request: Request):
                 if (typeof refreshScheduleStatus === 'function') {{
                     refreshScheduleStatus();
                 }}
+                htmx.ajax('GET', '/api/operation-banner', {{target: '#global-operation-banner', swap: 'innerHTML'}});
             </script>
         ''')
     else:

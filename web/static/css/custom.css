@@ -1051,10 +1051,11 @@ footer {
 [data-theme="light"] .di-pill--completed-errors { --accent: #e07800; --accent-dim: rgba(224,120,0,0.12); --accent-glow: rgba(224,120,0,0.08); }
 [data-theme="light"] .di-pill--idle      { --accent: #b8860b; --accent-dim: rgba(184,134,11,0.08); --accent-glow: rgba(184,134,11,0.05); }
 
-/* White pill surface */
+/* White pill surface — stronger shadow + border for visibility on #e8e8ed bg */
 [data-theme="light"] .di-pill {
     background: #ffffff;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08);
+    border: 1.5px solid rgba(0,0,0,0.12);
 }
 
 /* Labels, metrics, text */
@@ -1175,9 +1176,9 @@ footer {
     animation-name: diCompleteFlashLight;
 }
 @keyframes diCompleteFlashLight {
-    0%   { box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06), 0 0 0 0 var(--accent-glow); }
-    50%  { box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06), 0 0 12px 4px var(--accent-glow); }
-    100% { box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06), 0 0 0 0 var(--accent-glow); }
+    0%   { box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08), 0 0 0 0 var(--accent-glow); }
+    50%  { box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08), 0 0 12px 4px var(--accent-glow); }
+    100% { box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08), 0 0 0 0 var(--accent-glow); }
 }
 
 /* Log lines in detail panel */

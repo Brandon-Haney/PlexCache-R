@@ -538,16 +538,14 @@ document.addEventListener('htmx:afterSwap', function(evt) {
 function dismissMaintCompletionBanner() {
     var pill = document.querySelector('#global-operation-banner .di-pill');
     diSetExpandState('false');  /* Reset so idle pill doesn't inherit expanded layout */
-    sessionStorage.removeItem('plexcache_nextrun_dismissed');
     if (pill && pill.style.opacity !== '0') {
         pill.style.transition = 'opacity 0.4s ease-out, transform 0.4s ease-out';
         pill.style.opacity = '0';
         pill.style.transform = 'translateY(-20px)';
         setTimeout(function() {
-            fetch('/maintenance/dismiss-action', { method: 'POST' });
-            document.getElementById('global-operation-banner').innerHTML =
-                '<div hx-get="/api/operation-banner" hx-trigger="every 10s" hx-swap="innerHTML" hx-target="#global-operation-banner"></div>';
-            htmx.process(document.getElementById('global-operation-banner'));
+            fetch('/maintenance/dismiss-action', { method: 'POST' }).then(function() {
+                htmx.ajax('GET', '/api/operation-banner', {target: '#global-operation-banner', swap: 'innerHTML'});
+            });
         }, 400);
     }
 }
@@ -569,7 +567,7 @@ function dismissMaintCompletionBanner() {
             <span class="di-metric--muted" style="max-width: 180px; overflow: hidden; text-overflow: ellipsis;">{{ maint_status.error_message|truncate(30, True, '...') }}</span>
             {% endif %}
             <button class="di-dismiss" title="Dismiss"
-                    onclick="event.stopPropagation(); fetch('/maintenance/dismiss-action',{method:'POST'}); document.getElementById('global-operation-banner').innerHTML='<div hx-get=/api/operation-banner hx-trigger=every\ 10s hx-swap=innerHTML hx-target=#global-operation-banner></div>'; htmx.process(document.getElementById('global-operation-banner'));">&times;</button>
+                    onclick="event.stopPropagation(); fetch('/maintenance/dismiss-action',{method:'POST'}).then(function(){htmx.ajax('GET','/api/operation-banner',{target:'#global-operation-banner',swap:'innerHTML'});});">&times;</button>
         </div>
     </div>
     <div class="di-pill__expanded">
@@ -580,7 +578,7 @@ function dismissMaintCompletionBanner() {
             </div>
             <div class="di-expanded__header-right">
                 <button class="di-dismiss" title="Dismiss"
-                        onclick="event.stopPropagation(); fetch('/maintenance/dismiss-action',{method:'POST'}); document.getElementById('global-operation-banner').innerHTML='<div hx-get=/api/operation-banner hx-trigger=every\ 10s hx-swap=innerHTML hx-target=#global-operation-banner></div>'; htmx.process(document.getElementById('global-operation-banner'));">&times;</button>
+                        onclick="event.stopPropagation(); fetch('/maintenance/dismiss-action',{method:'POST'}).then(function(){htmx.ajax('GET','/api/operation-banner',{target:'#global-operation-banner',swap:'innerHTML'});});">&times;</button>
             </div>
         </div>
         {% if maint_status.error_message %}
@@ -745,7 +743,7 @@ function dismissMaintCompletionBanner() {
 </div>
 <script>
     lucide.createIcons();
-    sessionStorage.removeItem('plexcache_nextrun_dismissed');
+
     if (window.BannerLogStream) BannerLogStream.connect();
     {% if blocked_message is defined and blocked_message %}showBannerWarning('{{ blocked_message }}');{% endif %}
 </script>
@@ -901,16 +899,14 @@ function dismissMaintCompletionBanner() {
 function dismissCompletionBanner() {
     var pill = document.querySelector('#global-operation-banner .di-pill');
     diSetExpandState('false');  /* Reset so idle pill doesn't inherit expanded layout */
-    sessionStorage.removeItem('plexcache_nextrun_dismissed');
     if (pill && pill.style.opacity !== '0') {
         pill.style.transition = 'opacity 0.4s ease-out, transform 0.4s ease-out';
         pill.style.opacity = '0';
         pill.style.transform = 'translateY(-20px)';
         setTimeout(function() {
-            fetch('/api/dismiss-operation', { method: 'POST' });
-            document.getElementById('global-operation-banner').innerHTML =
-                '<div hx-get="/api/operation-banner" hx-trigger="every 10s" hx-swap="innerHTML" hx-target="#global-operation-banner"></div>';
-            htmx.process(document.getElementById('global-operation-banner'));
+            fetch('/api/dismiss-operation', { method: 'POST' }).then(function() {
+                htmx.ajax('GET', '/api/operation-banner', {target: '#global-operation-banner', swap: 'innerHTML'});
+            });
         }, 400);
     }
 }
@@ -932,7 +928,7 @@ function dismissCompletionBanner() {
             <span class="di-metric--muted" style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ status.error_message|truncate(30, True, '...') }}</span>
             {% endif %}
             <button class="di-dismiss" title="Dismiss"
-                    onclick="event.stopPropagation(); fetch('/api/dismiss-operation',{method:'POST'}); document.getElementById('global-operation-banner').innerHTML='<div hx-get=/api/operation-banner hx-trigger=every\ 10s hx-swap=innerHTML hx-target=#global-operation-banner></div>'; htmx.process(document.getElementById('global-operation-banner'));">&times;</button>
+                    onclick="event.stopPropagation(); fetch('/api/dismiss-operation',{method:'POST'}).then(function(){htmx.ajax('GET','/api/operation-banner',{target:'#global-operation-banner',swap:'innerHTML'});});">&times;</button>
         </div>
     </div>
     <div class="di-pill__expanded">
@@ -943,7 +939,7 @@ function dismissCompletionBanner() {
             </div>
             <div class="di-expanded__header-right">
                 <button class="di-dismiss" title="Dismiss"
-                        onclick="event.stopPropagation(); fetch('/api/dismiss-operation',{method:'POST'}); document.getElementById('global-operation-banner').innerHTML='<div hx-get=/api/operation-banner hx-trigger=every\ 10s hx-swap=innerHTML hx-target=#global-operation-banner></div>'; htmx.process(document.getElementById('global-operation-banner'));">&times;</button>
+                        onclick="event.stopPropagation(); fetch('/api/dismiss-operation',{method:'POST'}).then(function(){htmx.ajax('GET','/api/operation-banner',{target:'#global-operation-banner',swap:'innerHTML'});});">&times;</button>
             </div>
         </div>
         {% if status.error_message %}
@@ -1230,7 +1226,7 @@ function diTriggerRun(dryRun) {
     var formData = new FormData();
     if (verbose && verbose.checked) formData.append('verbose', 'true');
     if (dryRun) formData.append('dry_run', 'true');
-    sessionStorage.removeItem('plexcache_nextrun_dismissed');
+
     diSetExpandState('false');
     fetch('/operations/run', { method: 'POST', body: formData })
         .then(function(resp) { return resp.text(); })

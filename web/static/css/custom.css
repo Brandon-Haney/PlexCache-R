@@ -445,7 +445,8 @@ footer {
     /* No entrance animation — HTMX replaces innerHTML every 2s and would
        replay it each time, causing a visible bounce.  Entrance animation
        is applied once via .di-pill--entrance in JS on state changes. */
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 /* One-shot entrance animation — added by JS only on real state changes */
 .di-pill--entrance { animation: diSlideDown 0.3s ease-out; }

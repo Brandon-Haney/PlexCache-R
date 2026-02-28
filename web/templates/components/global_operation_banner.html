@@ -260,6 +260,18 @@ function diPillClick() {
     else diSmoothSetState('false');  /* tier3 → collapse back to compact */
 }
 
+// Skip the swap entirely if banner content hasn't meaningfully changed.
+// Prevents the pill from flashing on every idle poll cycle.
+document.addEventListener('htmx:beforeSwap', function(evt) {
+    if (evt.detail.target && evt.detail.target.id === 'global-operation-banner') {
+        var oldHtml = evt.detail.target.innerHTML.replace(/\s+/g, ' ').trim();
+        var newHtml = (evt.detail.serverResponse || '').replace(/\s+/g, ' ').trim();
+        if (oldHtml === newHtml) {
+            evt.detail.shouldSwap = false;
+        }
+    }
+});
+
 // After every HTMX swap: re-render icons, sync animations, one-shot entrance
 document.addEventListener('htmx:afterSwap', function(evt) {
     if (evt.detail.target && evt.detail.target.id === 'global-operation-banner') {

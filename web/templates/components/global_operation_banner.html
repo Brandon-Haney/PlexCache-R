@@ -214,6 +214,7 @@ function _diDoFlip(outer, pill, fromState, toState, isExpanding) {
         pill.style.overflow = '';
         pill.style.transition = '';
         pill.style.willChange = '';
+        pill.style.opacity = '';
         if (progressBar) {
             if (isExpanding) {
                 progressBar.style.transition = '';
@@ -225,7 +226,7 @@ function _diDoFlip(outer, pill, fromState, toState, isExpanding) {
         var c = pill.querySelector('.di-pill__compact');
         if (c) c.classList.remove('di-content-settle');
         var e = pill.querySelector('.di-pill__expanded');
-        if (e) e.classList.remove('di-content-enter');
+        if (e) { e.classList.remove('di-content-enter'); e.classList.remove('di-content-exit'); }
         outer._flipCleanup = null;
         pill.removeEventListener('transitionend', onEnd);
     }
@@ -286,6 +287,10 @@ document.addEventListener('htmx:beforeSwap', function(evt) {
 
         var newState = newPill.getAttribute('data-state') || '';
         if (oldState !== newState) return;  // State changed — allow swap
+
+        // If pill is invisible (stale animation state), allow the swap to reset it
+        var cs = getComputedStyle(oldPill);
+        if (cs.opacity === '0' || oldPill.offsetHeight === 0) return;
 
         // Same state — patch countdown text in-place without full DOM swap
         var newMetric = newPill.querySelector('.di-metric');
@@ -592,8 +597,10 @@ document.addEventListener('htmx:afterSwap', function(evt) {
 
 function dismissMaintCompletionBanner() {
     var pill = document.querySelector('#global-operation-banner .di-pill');
-    diSetExpandState('false');  /* Reset so idle pill doesn't inherit expanded layout */
-    if (pill && pill.style.opacity !== '0') {
+    // Guard: only dismiss if this is still a maintenance completion pill (auto-dismiss timer may fire late)
+    if (!pill || (pill.getAttribute('data-state') || '').indexOf('maint-completed') !== 0) return;
+    diSetExpandState('false');
+    if (pill.style.opacity !== '0') {
         pill.style.transition = 'opacity 0.4s ease-out, transform 0.4s ease-out';
         pill.style.opacity = '0';
         pill.style.transform = 'translateY(-20px)';
@@ -970,8 +977,10 @@ function dismissMaintCompletionBanner() {
 
 function dismissCompletionBanner() {
     var pill = document.querySelector('#global-operation-banner .di-pill');
-    diSetExpandState('false');  /* Reset so idle pill doesn't inherit expanded layout */
-    if (pill && pill.style.opacity !== '0') {
+    // Guard: only dismiss if this is still a completion pill (auto-dismiss timer may fire late)
+    if (!pill || (pill.getAttribute('data-state') || '').indexOf('op-completed') !== 0) return;
+    diSetExpandState('false');
+    if (pill.style.opacity !== '0') {
         pill.style.transition = 'opacity 0.4s ease-out, transform 0.4s ease-out';
         pill.style.opacity = '0';
         pill.style.transform = 'translateY(-20px)';

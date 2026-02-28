@@ -260,15 +260,43 @@ function diPillClick() {
     else diSmoothSetState('false');  /* tier3 → collapse back to compact */
 }
 
-// Skip the swap entirely if banner content hasn't meaningfully changed.
-// Prevents the pill from flashing on every idle poll cycle.
+// Skip the swap if the banner state hasn't meaningfully changed.
+// Prevents the pill from flashing on every idle/completed poll cycle.
+// innerHTML comparison doesn't work because script tags differ between
+// server response and post-execution DOM.  Instead, parse the response
+// into a temporary fragment, compare data-state, and patch text in-place.
+// Running/maintenance polls always swap (they show live progress).
 document.addEventListener('htmx:beforeSwap', function(evt) {
     if (evt.detail.target && evt.detail.target.id === 'global-operation-banner') {
-        var oldHtml = evt.detail.target.innerHTML.replace(/\s+/g, ' ').trim();
-        var newHtml = (evt.detail.serverResponse || '').replace(/\s+/g, ' ').trim();
-        if (oldHtml === newHtml) {
-            evt.detail.shouldSwap = false;
-        }
+        var banner = evt.detail.target;
+        var oldPill = banner.querySelector('.di-pill');
+        if (!oldPill) return;  // No pill yet — allow first swap
+
+        var oldState = oldPill.getAttribute('data-state') || '';
+
+        // Only skip for static states — running states need live updates
+        if (oldState.indexOf('idle') !== 0 && oldState.indexOf('completed') !== 0
+            && oldState.indexOf('maint-completed') !== 0) return;
+
+        // Parse response into a temporary DOM to read new state
+        var tmp = document.createElement('div');
+        tmp.innerHTML = evt.detail.serverResponse || '';
+        var newPill = tmp.querySelector('.di-pill');
+        if (!newPill) return;  // No pill in response — allow swap
+
+        var newState = newPill.getAttribute('data-state') || '';
+        if (oldState !== newState) return;  // State changed — allow swap
+
+        // Same state — patch countdown text in-place without full DOM swap
+        var newMetric = newPill.querySelector('.di-metric');
+        var oldMetric = oldPill.querySelector('.di-metric');
+        if (newMetric && oldMetric) oldMetric.textContent = newMetric.textContent;
+
+        var newLabel = newPill.querySelector('.di-pill__expanded .di-label');
+        var oldLabel = oldPill.querySelector('.di-pill__expanded .di-label');
+        if (newLabel && oldLabel) oldLabel.textContent = newLabel.textContent;
+
+        evt.detail.shouldSwap = false;
     }
 });
 

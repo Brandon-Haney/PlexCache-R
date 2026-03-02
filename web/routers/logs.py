@@ -383,7 +383,26 @@ async def _ws_live_stream(websocket: WebSocket):
                     "lines": [parsed],
                     "counts": line_counts,
                 })
+                heartbeat_counter = 0
             except asyncio.TimeoutError:
+                # When operation finishes, drain any remaining messages then exit
+                if not runner.is_running:
+                    while not queue.empty():
+                        try:
+                            msg = queue.get_nowait()
+                            parsed = parse_log_line(msg, '')
+                            line_counts = {}
+                            if not parsed['is_continuation'] and parsed['level']:
+                                line_counts[parsed['level']] = 1
+                            await websocket.send_json({
+                                "type": "append",
+                                "lines": [parsed],
+                                "counts": line_counts,
+                            })
+                        except asyncio.QueueEmpty:
+                            break
+                    await websocket.send_json({"type": "complete"})
+                    break
                 # Send heartbeat
                 heartbeat_counter += 1
                 if heartbeat_counter >= 5:

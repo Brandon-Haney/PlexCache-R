@@ -501,6 +501,10 @@ var LogViewer = (function() {
                 } else if (data.type === 'append') {
                     renderLogLines(data.lines, true);
                     mergeBadgeCounts(data.counts || {});
+                } else if (data.type === 'complete') {
+                    // Operation finished — switch to file tailing for any remaining lines
+                    disconnectWebSocket();
+                    setTimeout(function() { connectWebSocket(); }, 1000);
                 } else if (data.type === 'error') {
                     console.error('WebSocket error:', data.message);
                 }

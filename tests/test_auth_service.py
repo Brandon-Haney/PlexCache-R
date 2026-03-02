@@ -35,8 +35,11 @@ def tmp_settings(tmp_path):
     """Create a temporary settings file and patch SETTINGS_FILE."""
     settings_file = tmp_path / "plexcache_settings.json"
     settings_file.write_text(json.dumps({}, indent=2))
+    sessions_file = str(tmp_path / "sessions.json")
 
-    with patch('web.services.auth_service.SETTINGS_FILE', settings_file):
+    with patch('web.services.auth_service.SETTINGS_FILE', settings_file), \
+         patch('web.services.auth_service.DATA_DIR', tmp_path), \
+         patch('web.services.auth_service.AuthService.SESSIONS_FILE', sessions_file):
         yield settings_file
 
 
@@ -122,6 +125,84 @@ class TestSessionLifecycle:
 
     def test_session_ttl_remember_me(self, auth_service):
         assert auth_service.get_session_ttl(True) == 7 * 24 * 3600
+
+
+# ============================================================================
+# Session persistence
+# ============================================================================
+
+class TestSessionPersistence:
+    """Test that sessions survive across AuthService restarts."""
+
+    def test_sessions_persist_to_disk(self, tmp_path):
+        """Sessions created by one instance are restored by a new instance."""
+        from web.services.auth_service import AuthService
+
+        sessions_file = str(tmp_path / "sessions.json")
+        settings_file = tmp_path / "plexcache_settings.json"
+        settings_file.write_text(json.dumps({}, indent=2))
+
+        with patch('web.services.auth_service.SETTINGS_FILE', settings_file), \
+             patch('web.services.auth_service.DATA_DIR', tmp_path), \
+             patch.object(AuthService, 'SESSIONS_FILE', sessions_file):
+
+            svc1 = AuthService()
+            token = svc1.create_session("12345", "admin")
+            assert svc1.validate_session(token) is not None
+
+            # New instance should restore the session
+            svc2 = AuthService()
+            session = svc2.validate_session(token)
+            assert session is not None
+            assert session.plex_id == "12345"
+            assert session.plex_username == "admin"
+
+    def test_expired_sessions_not_restored(self, tmp_path):
+        """Expired sessions on disk are discarded on load."""
+        from web.services.auth_service import AuthService
+
+        sessions_file = str(tmp_path / "sessions.json")
+        settings_file = tmp_path / "plexcache_settings.json"
+        settings_file.write_text(json.dumps({}, indent=2))
+
+        with patch('web.services.auth_service.SETTINGS_FILE', settings_file), \
+             patch('web.services.auth_service.DATA_DIR', tmp_path), \
+             patch.object(AuthService, 'SESSIONS_FILE', sessions_file):
+
+            svc1 = AuthService()
+            token = svc1.create_session("12345", "admin")
+
+            # Manually expire on disk
+            with open(sessions_file, "r") as f:
+                data = json.load(f)
+            data[token]["expires_at"] = time.time() - 100
+            with open(sessions_file, "w") as f:
+                json.dump(data, f, indent=2)
+
+            # New instance should not restore expired session
+            svc2 = AuthService()
+            assert svc2.validate_session(token) is None
+            assert svc2.active_session_count() == 0
+
+    def test_destroy_session_persists(self, tmp_path):
+        """Destroying a session updates the disk file."""
+        from web.services.auth_service import AuthService
+
+        sessions_file = str(tmp_path / "sessions.json")
+        settings_file = tmp_path / "plexcache_settings.json"
+        settings_file.write_text(json.dumps({}, indent=2))
+
+        with patch('web.services.auth_service.SETTINGS_FILE', settings_file), \
+             patch('web.services.auth_service.DATA_DIR', tmp_path), \
+             patch.object(AuthService, 'SESSIONS_FILE', sessions_file):
+
+            svc1 = AuthService()
+            token = svc1.create_session("12345", "admin")
+            svc1.destroy_session(token)
+
+            # New instance should not have the destroyed session
+            svc2 = AuthService()
+            assert svc2.validate_session(token) is None
 
 
 # ============================================================================

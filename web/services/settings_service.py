@@ -605,6 +605,53 @@ class SettingsService:
 
         return self._save_raw(raw)
 
+    def get_security_settings(self) -> Dict[str, Any]:
+        """Get security/auth settings"""
+        raw = self._load_raw()
+        return {
+            "auth_enabled": raw.get("auth_enabled", False),
+            "auth_admin_plex_id": raw.get("auth_admin_plex_id", ""),
+            "auth_admin_username": raw.get("auth_admin_username", ""),
+            "auth_password_enabled": raw.get("auth_password_enabled", False),
+            "auth_password_username": raw.get("auth_password_username", ""),
+            "auth_session_hours": raw.get("auth_session_hours", 24),
+        }
+
+    def save_security_settings(self, settings: Dict[str, Any]) -> bool:
+        """Save security/auth settings"""
+        raw = self._load_raw()
+
+        if "auth_enabled" in settings:
+            raw["auth_enabled"] = bool(settings["auth_enabled"])
+
+        if "auth_session_hours" in settings:
+            try:
+                hours = int(float(settings["auth_session_hours"]))
+                if 1 <= hours <= 720:
+                    raw["auth_session_hours"] = hours
+            except (ValueError, TypeError):
+                pass
+
+        if "auth_password_enabled" in settings:
+            raw["auth_password_enabled"] = bool(settings["auth_password_enabled"])
+
+        if "auth_password_username" in settings:
+            raw["auth_password_username"] = str(settings["auth_password_username"]).strip()
+
+        if "auth_password_hash" in settings:
+            raw["auth_password_hash"] = settings["auth_password_hash"]
+
+        if "auth_password_salt" in settings:
+            raw["auth_password_salt"] = settings["auth_password_salt"]
+
+        if "auth_admin_plex_id" in settings:
+            raw["auth_admin_plex_id"] = settings["auth_admin_plex_id"]
+
+        if "auth_admin_username" in settings:
+            raw["auth_admin_username"] = settings["auth_admin_username"]
+
+        return self._save_raw(raw)
+
     def check_plex_connection(self) -> bool:
         """Check if Plex server is reachable"""
         settings = self.get_plex_settings()
@@ -1154,6 +1201,18 @@ class SettingsService:
             # Redact arr instance API keys
             for inst in settings.get("arr_instances", []):
                 inst["api_key"] = ""
+
+            # Redact auth credentials and identity
+            if "auth_password_hash" in settings:
+                settings["auth_password_hash"] = "[REDACTED]"
+            if "auth_password_salt" in settings:
+                settings["auth_password_salt"] = "[REDACTED]"
+            if "auth_password_username" in settings:
+                settings["auth_password_username"] = "[REDACTED]"
+            if "auth_admin_plex_id" in settings:
+                settings["auth_admin_plex_id"] = "[REDACTED]"
+            if "auth_admin_username" in settings:
+                settings["auth_admin_username"] = "[REDACTED]"
 
             # Anonymize users in both _cached_users and users arrays
             for i, user in enumerate(settings.get("_cached_users", []), 1):

@@ -958,6 +958,130 @@ def save_logging_settings(
 
 
 # =============================================================================
+# Security tab endpoints
+# =============================================================================
+
+@router.get("/security", response_class=HTMLResponse)
+def settings_security(request: Request):
+    """Security settings tab"""
+    from web.services.auth_service import get_auth_service
+
+    settings_service = get_settings_service()
+    auth_service = get_auth_service()
+    settings = settings_service.get_security_settings()
+
+    return templates.TemplateResponse(
+        "settings/security.html",
+        {
+            "request": request,
+            "page_title": "Security Settings",
+            "active_tab": "security",
+            "settings": settings,
+            "active_sessions": auth_service.active_session_count(),
+        }
+    )
+
+
+@router.put("/security", response_class=HTMLResponse)
+def save_security_settings(
+    request: Request,
+    auth_enabled: str = Form(None),
+    auth_session_hours: int = Form(24),
+    auth_password_enabled: str = Form(None),
+    auth_password_username: str = Form(""),
+    auth_password: str = Form(""),
+):
+    """Save security settings"""
+    from web.services.auth_service import get_auth_service
+
+    settings_service = get_settings_service()
+    auth_service = get_auth_service()
+
+    was_enabled = settings_service.get_security_settings().get("auth_enabled", False)
+    now_enabled = auth_enabled == "true"
+    password_enabled = auth_password_enabled == "true"
+
+    save_data = {
+        "auth_enabled": now_enabled,
+        "auth_session_hours": auth_session_hours,
+        "auth_password_enabled": password_enabled,
+    }
+
+    if password_enabled:
+        if auth_password_username:
+            save_data["auth_password_username"] = auth_password_username
+        if auth_password:
+            pw_hash, pw_salt = auth_service.hash_password(auth_password)
+            save_data["auth_password_hash"] = pw_hash
+            save_data["auth_password_salt"] = pw_salt
+
+    # Capture admin identity when enabling auth for the first time
+    if now_enabled and not was_enabled:
+        result = auth_service.capture_admin_identity()
+        if result is None:
+            return templates.TemplateResponse(
+                "partials/alert.html",
+                {
+                    "request": request,
+                    "type": "error",
+                    "message": "Could not capture admin identity from Plex. "
+                               "Ensure your Plex server is reachable and PLEX_TOKEN is configured."
+                }
+            )
+        save_data["auth_admin_plex_id"] = result["account_id"]
+        save_data["auth_admin_username"] = result["username"]
+
+    # When disabling auth, destroy all sessions
+    if was_enabled and not now_enabled:
+        auth_service.destroy_all_sessions()
+
+    success = settings_service.save_security_settings(save_data)
+
+    if success:
+        msg = "Security settings saved"
+        if now_enabled and not was_enabled:
+            msg += ". Authentication is now enabled — you will be redirected to sign in."
+        elif was_enabled and not now_enabled:
+            msg += ". Authentication disabled — all sessions cleared."
+
+        return templates.TemplateResponse(
+            "partials/alert.html",
+            {
+                "request": request,
+                "type": "success",
+                "message": msg,
+            }
+        )
+    else:
+        return templates.TemplateResponse(
+            "partials/alert.html",
+            {
+                "request": request,
+                "type": "error",
+                "message": "Failed to save security settings"
+            }
+        )
+
+
+@router.post("/security/logout-all", response_class=HTMLResponse)
+def security_logout_all(request: Request):
+    """Sign out all active sessions"""
+    from web.services.auth_service import get_auth_service
+
+    auth_service = get_auth_service()
+    auth_service.destroy_all_sessions()
+
+    return templates.TemplateResponse(
+        "partials/alert.html",
+        {
+            "request": request,
+            "type": "success",
+            "message": "All sessions signed out"
+        }
+    )
+
+
+# =============================================================================
 # Integrations tab endpoints (Sonarr/Radarr)
 # =============================================================================
 

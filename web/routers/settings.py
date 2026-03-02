@@ -1,10 +1,12 @@
 """Settings routes"""
 
+import ipaddress
 import time
 import uuid
 import threading
 from pathlib import Path
 from typing import Dict, Any, List
+from urllib.parse import urlparse
 
 import requests
 from fastapi import APIRouter, Request, Form, Query
@@ -29,6 +31,33 @@ PLEXCACHE_PRODUCT_NAME = 'PlexCache-D'
 # Store OAuth state in memory (with lock for thread safety)
 _oauth_state: Dict[str, Any] = {}
 _oauth_state_lock = threading.Lock()
+
+
+def _validate_outbound_url(url: str) -> tuple:
+    """Validate a URL is safe for server-side requests (SSRF prevention).
+
+    Returns (is_valid: bool, error_message: str).
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "Invalid URL"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, "URL must use http:// or https://"
+
+    if not parsed.hostname:
+        return False, "URL must include a hostname"
+
+    # Block direct requests to private/loopback/link-local IPs
+    try:
+        addr = ipaddress.ip_address(parsed.hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            return False, "URL must not target private or internal addresses"
+    except ValueError:
+        pass  # Hostname is a domain name, not an IP literal
+
+    return True, ""
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -824,6 +853,13 @@ def test_webhook(request: Request, webhook_url: str = Form(...)):
             {"request": request, "type": "error", "message": "No webhook URL provided"}
         )
 
+    valid, err = _validate_outbound_url(webhook_url)
+    if not valid:
+        return templates.TemplateResponse(
+            "partials/alert.html",
+            {"request": request, "type": "error", "message": err}
+        )
+
     # Detect platform from URL
     url_lower = webhook_url.lower()
     if 'discord.com/api/webhooks/' in url_lower or 'discordapp.com/api/webhooks/' in url_lower:
@@ -1197,6 +1233,10 @@ def test_arr_connection(
     if not url or not api_key:
         return JSONResponse({"success": False, "message": "URL and API key are required"})
 
+    valid, err = _validate_outbound_url(url)
+    if not valid:
+        return JSONResponse({"success": False, "message": err})
+
     type_label = arr_type.title()  # "Sonarr" or "Radarr"
 
     try:
@@ -1327,8 +1367,13 @@ async def validate_settings_file(request: Request):
         )
 
     try:
-        # Read and parse JSON
-        content = await file.read()
+        # Read and parse JSON (cap at 1 MB to prevent abuse)
+        content = await file.read(1_048_576 + 1)
+        if len(content) > 1_048_576:
+            return templates.TemplateResponse(
+                "settings/partials/backup_validation.html",
+                {"request": request, "valid": False, "errors": ["File too large (max 1 MB)"], "warnings": []}
+            )
         settings_data = json.loads(content.decode('utf-8'))
     except json.JSONDecodeError as e:
         return templates.TemplateResponse(
@@ -1388,8 +1433,13 @@ async def import_settings_file(request: Request):
         )
 
     try:
-        # Read and parse JSON
-        content = await file.read()
+        # Read and parse JSON (cap at 1 MB to prevent abuse)
+        content = await file.read(1_048_576 + 1)
+        if len(content) > 1_048_576:
+            return templates.TemplateResponse(
+                "partials/alert.html",
+                {"request": request, "type": "error", "message": "File too large (max 1 MB)"}
+            )
         settings_data = json.loads(content.decode('utf-8'))
     except json.JSONDecodeError as e:
         return templates.TemplateResponse(

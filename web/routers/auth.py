@@ -19,6 +19,15 @@ router = APIRouter()
 PLEXCACHE_PRODUCT_NAME = "PlexCache-D"
 
 
+def _is_safe_redirect(url: str) -> bool:
+    """Validate that redirect target is a local path (prevents open redirect)."""
+    if not url or not url.startswith("/"):
+        return False
+    if url.startswith("//") or url.startswith("/\\"):
+        return False
+    return True
+
+
 def _get_client_ip(request: Request) -> str:
     """Extract client IP from request (respects X-Forwarded-For)."""
     forwarded = request.headers.get("x-forwarded-for", "")
@@ -31,6 +40,7 @@ def _get_client_ip(request: Request) -> str:
 def login_page(request: Request, next: str = "/"):
     """Render login page."""
     auth_service = get_auth_service()
+    safe_next = next if _is_safe_redirect(next) else "/"
 
     # If auth is disabled, redirect to home
     if not auth_service.is_auth_enabled():
@@ -39,7 +49,7 @@ def login_page(request: Request, next: str = "/"):
     # If already authenticated, redirect
     session_token = request.cookies.get("plexcache_session")
     if session_token and auth_service.validate_session(session_token):
-        return RedirectResponse(url=next, status_code=302)
+        return RedirectResponse(url=safe_next, status_code=302)
 
     settings = auth_service._load_settings()
     password_enabled = settings.get("auth_password_enabled", False)
@@ -48,7 +58,7 @@ def login_page(request: Request, next: str = "/"):
         "auth/login.html",
         {
             "request": request,
-            "next_url": next,
+            "next_url": safe_next,
             "password_enabled": password_enabled,
             "error": None,
         },
@@ -187,6 +197,7 @@ def password_login(
     """Password-based login (rate limited)."""
     auth_service = get_auth_service()
     client_ip = _get_client_ip(request)
+    safe_next = next_url if _is_safe_redirect(next_url) else "/"
 
     # Check rate limit
     allowed, retry_after = auth_service.check_rate_limit(client_ip)
@@ -196,7 +207,7 @@ def password_login(
             "auth/login.html",
             {
                 "request": request,
-                "next_url": next_url,
+                "next_url": safe_next,
                 "password_enabled": settings.get("auth_password_enabled", False),
                 "error": f"Too many login attempts. Try again in {retry_after} seconds.",
             },
@@ -213,7 +224,7 @@ def password_login(
             remember_me=remember_me,
         )
 
-        response = RedirectResponse(url=next_url, status_code=302)
+        response = RedirectResponse(url=safe_next, status_code=302)
         response.set_cookie(
             key="plexcache_session",
             value=session_token,
@@ -231,7 +242,7 @@ def password_login(
         "auth/login.html",
         {
             "request": request,
-            "next_url": next_url,
+            "next_url": safe_next,
             "password_enabled": settings.get("auth_password_enabled", False),
             "error": "Invalid username or password",
         },

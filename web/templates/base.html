@@ -104,9 +104,18 @@
                     </a>
                 </li>
             </ul>
+            {% if request.state.user is defined and request.state.user %}
+            <form method="post" action="/auth/logout" style="margin: 0; padding: 0 0.5rem;">
+                <button type="submit" class="sidebar-logout-btn" title="Sign out ({{ request.state.user.plex_username }})">
+                    <i data-lucide="log-out"></i>
+                    <span>Sign Out</span>
+                </button>
+            </form>
+            {% endif %}
             <div class="sidebar-footer">
                 <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Collapse sidebar">
                     <i data-lucide="panel-left-close"></i>
+                    <span>Collapse</span>
                 </button>
             </div>
         </nav>

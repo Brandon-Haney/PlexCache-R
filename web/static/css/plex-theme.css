@@ -1419,6 +1419,12 @@ textarea {
     gap: 0;
     border-bottom: 1px solid var(--plex-border);
     margin-bottom: 1.5rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+    display: none;
 }
 
 .tab {
@@ -1428,6 +1434,8 @@ textarea {
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     transition: all 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .tab:hover {

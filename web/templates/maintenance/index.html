@@ -523,6 +523,12 @@ document.addEventListener('htmx:afterSwap', function(e) {
         selectedOrphanedBackups.clear();
         updateUntrackedActions();
         updateOrphanedActions();
+
+        // Auto-expand duplicate section if navigated with #duplicates hash
+        if (window.location.hash === '#duplicates') {
+            showDuplicateSection();
+            history.replaceState(null, '', window.location.pathname);
+        }
     }
 });
 
@@ -548,6 +554,28 @@ function toggleDuplicateSection() {
         if (chevron) chevron.style.transform = '';
     }
     if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function showDuplicateSection() {
+    const content = document.getElementById('dup-section-content');
+    const chevron = document.getElementById('dup-section-chevron');
+    const header = content && content.closest('.card');
+    if (!content) return;
+
+    // Expand if collapsed
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+        if (typeof htmx !== 'undefined') {
+            htmx.process(content);
+        }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    // Scroll the card into view
+    if (header) {
+        header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 function toggleDuplicateExpand(row) {

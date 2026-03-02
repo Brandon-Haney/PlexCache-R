@@ -37,6 +37,12 @@
         <div class="stat-value" style="color: var(--success);">OK</div>
         <div class="stat-label">no issues</div>
         {% endif %}
+        {% if dup_summary is defined and dup_summary.duplicate_count > 0 %}
+        <a href="javascript:void(0)" onclick="showDuplicateSection()" class="stat-detail" style="margin-top: 0.35rem; font-size: 0.75rem; color: var(--warning); text-decoration: none; display: block; cursor: pointer;">
+            <i data-lucide="copy" style="width: 12px; height: 12px; vertical-align: middle;"></i>
+            {{ dup_summary.duplicate_count }} duplicate{{ 's' if dup_summary.duplicate_count != 1 }}{% if dup_summary.orphan_count > 0 %} &middot; {{ dup_summary.orphan_count }} orphan{{ 's' if dup_summary.orphan_count != 1 }}{% if dup_summary.orphan_bytes_display %} ({{ dup_summary.orphan_bytes_display }}){% endif %}{% endif %}
+        </a>
+        {% endif %}
     </div>
 
     <div class="stat-card {% if results.unprotected_files|length == 0 %}stat-card-success{% endif %}">

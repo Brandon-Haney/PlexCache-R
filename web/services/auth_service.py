@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from web.config import SETTINGS_FILE
+from core.file_operations import save_json_atomically
+from web.config import SETTINGS_FILE, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +56,62 @@ class AuthService:
     PBKDF2_ITERATIONS = 600_000
     SALT_LENGTH = 32
 
+    SESSIONS_FILE = str(DATA_DIR / "sessions.json")
+
     def __init__(self):
         self._sessions: Dict[str, Session] = {}
         self._sessions_lock = threading.Lock()
         self._rate_limits: Dict[str, RateLimitEntry] = {}
         self._rate_limits_lock = threading.Lock()
+        self._load_sessions()
+
+    # -------------------------------------------------------------------------
+    # Session persistence
+    # -------------------------------------------------------------------------
+
+    def _load_sessions(self) -> None:
+        """Load sessions from disk on startup, discarding expired ones."""
+        try:
+            with open(self.SESSIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
+            return
+
+        now = time.time()
+        for token, entry in data.items():
+            try:
+                session = Session(
+                    token=token,
+                    plex_id=entry["plex_id"],
+                    plex_username=entry["plex_username"],
+                    created_at=entry["created_at"],
+                    expires_at=entry["expires_at"],
+                    remember_me=entry.get("remember_me", False),
+                )
+                if session.expires_at > now:
+                    self._sessions[token] = session
+            except (KeyError, TypeError):
+                continue  # Skip malformed entries
+
+        if self._sessions:
+            logger.info("Restored %d session(s) from disk", len(self._sessions))
+
+    def _save_sessions(self) -> None:
+        """Persist current sessions to disk. Call with _sessions_lock held."""
+        data = {}
+        for token, session in self._sessions.items():
+            data[token] = {
+                "plex_id": session.plex_id,
+                "plex_username": session.plex_username,
+                "created_at": session.created_at,
+                "expires_at": session.expires_at,
+                "remember_me": session.remember_me,
+            }
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            save_json_atomically(self.SESSIONS_FILE, data, label="sessions")
+        except Exception as e:
+            logger.warning("Could not persist sessions: %s", e)
 
     # -------------------------------------------------------------------------
     # Settings helpers (read from disk each time for immediate recovery)
@@ -116,6 +168,7 @@ class AuthService:
 
         with self._sessions_lock:
             self._sessions[token] = session
+            self._save_sessions()
 
         logger.info("Session created for user %s", username)
         return token
@@ -129,6 +182,7 @@ class AuthService:
 
             if time.time() > session.expires_at:
                 del self._sessions[token]
+                self._save_sessions()
                 return None
 
             return session
@@ -137,11 +191,13 @@ class AuthService:
         """Remove a single session."""
         with self._sessions_lock:
             self._sessions.pop(token, None)
+            self._save_sessions()
 
     def destroy_all_sessions(self) -> None:
         """Remove all sessions (used when disabling auth)."""
         with self._sessions_lock:
             self._sessions.clear()
+            self._save_sessions()
         logger.info("All sessions destroyed")
 
     def active_session_count(self) -> int:
@@ -152,6 +208,8 @@ class AuthService:
             expired = [t for t, s in self._sessions.items() if now > s.expires_at]
             for t in expired:
                 del self._sessions[t]
+            if expired:
+                self._save_sessions()
             return len(self._sessions)
 
     def get_session_ttl(self, remember_me: bool = False) -> int:

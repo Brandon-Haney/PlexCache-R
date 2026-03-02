@@ -335,9 +335,13 @@ class SettingsService:
                 real_path = plex_path.replace(docker_prefix, host_prefix, 1)
                 break
 
-        # Generate cache_path from library folder name
-        lib_folder = plex_path.rstrip("/").split("/")[-1]
-        cache_path = f"{cache_dir}/{lib_folder}/"
+        # Derive cache_path using prefix swap to preserve full structure
+        # e.g., /data/GUEST/Movies/ -> /mnt/cache/GUEST/Movies/
+        cache_path = plex_path
+        for docker_prefix in ["/data/", "/media/"]:
+            if plex_path.startswith(docker_prefix):
+                cache_path = plex_path.replace(docker_prefix, cache_dir + "/", 1)
+                break
 
         return {
             "name": library["title"],

@@ -752,6 +752,23 @@ class ConfigManager:
             logging.error(error_msg)
             raise ValueError(error_msg)
 
+        # Warn about duplicate cache_path values among enabled, cacheable mappings
+        cache_path_to_names: Dict[str, List[str]] = {}
+        for mapping_data in self.settings_data.get('path_mappings', []):
+            if not mapping_data.get('enabled', True) or not mapping_data.get('cacheable', True):
+                continue
+            cp = mapping_data.get('cache_path', '')
+            if cp:
+                cache_path_to_names.setdefault(cp, []).append(mapping_data.get('name', 'Unnamed'))
+        for cp, names in cache_path_to_names.items():
+            if len(names) > 1:
+                logging.warning(
+                    "Path mappings %r and %r share the same cache_path %r "
+                    "\u2014 evictions may move files to wrong locations. "
+                    "Re-run setup or manually fix cache_path in plexcache_settings.json",
+                    names[0], names[1], cp,
+                )
+
         logging.debug("Value validation successful")
     
     def _save_updated_config(self) -> None:

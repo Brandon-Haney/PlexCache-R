@@ -287,9 +287,15 @@ async def setup_step3_post(request: Request):
                         real_path = plex_path_normalized.replace(docker_prefix, host_prefix, 1)
                         break
 
-                # Generate cache_path from library folder name
-                lib_folder = plex_path_normalized.rstrip('/').split('/')[-1]
-                cache_path = f"{cache_dir_normalized}/{lib_folder}/" if is_cacheable else None
+                # Derive cache_path using prefix swap to preserve full structure
+                # e.g., /data/GUEST/Movies/ -> /mnt/cache/GUEST/Movies/
+                cache_path = None
+                if is_cacheable:
+                    cache_path = plex_path_normalized
+                    for docker_prefix in ['/data/', '/media/']:
+                        if plex_path_normalized.startswith(docker_prefix):
+                            cache_path = plex_path_normalized.replace(docker_prefix, cache_dir_normalized + '/', 1)
+                            break
                 # host_cache_path defaults to same as cache_path (user can override in settings)
                 host_cache_path = cache_path
 

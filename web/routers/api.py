@@ -37,7 +37,11 @@ def _get_dashboard_stats_data(use_cache: bool = True) -> tuple[dict, str | None]
 
             # Update dynamic fields that shouldn't be cached
             cached_stats["is_running"] = operation_runner.is_running
-            return cached_stats, cache_age
+            # Stale cache from before duplicate support — recompute fresh
+            if "health_duplicate_count" not in cached_stats:
+                web_cache.invalidate(CACHE_KEY_DASHBOARD_STATS)
+            else:
+                return cached_stats, cache_age
 
     # Compute fresh stats
     cache_stats = cache_service.get_cache_stats()
@@ -66,10 +70,13 @@ def _get_dashboard_stats_data(use_cache: bool = True) -> tuple[dict, str | None]
         "next_run_relative": schedule_status.get("next_run_relative"),
         "health_status": health["status"],
         "health_issues": health["orphaned_count"],
-        "health_warnings": health["stale_exclude_count"] + health["stale_timestamp_count"],
+        "health_warnings": health["stale_exclude_count"] + health["stale_timestamp_count"] + health["duplicate_orphan_count"],
         "health_orphaned_count": health["orphaned_count"],
         "health_stale_exclude_count": health["stale_exclude_count"],
         "health_stale_timestamp_count": health["stale_timestamp_count"],
+        "health_duplicate_count": health["duplicate_count"],
+        "health_duplicate_orphan_count": health["duplicate_orphan_count"],
+        "health_duplicate_orphan_bytes": health["duplicate_orphan_bytes_display"],
         "last_run_summary": None,
     }
 

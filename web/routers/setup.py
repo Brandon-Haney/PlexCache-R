@@ -76,7 +76,7 @@ def setup_wizard(request: Request, step: int = 1):
         "request": request,
         "page_title": "Setup",
         "step": step,
-        "total_steps": 6,
+        "total_steps": 7,
         "settings": settings,
     }
 
@@ -135,11 +135,20 @@ def setup_wizard(request: Request, step: int = 1):
         context["cache_limit"] = settings.get("cache_limit", "")
 
     elif step == 6:
+        # Security (optional)
+        context["auth_enabled"] = settings.get("auth_enabled", False)
+        context["auth_session_hours"] = settings.get("auth_session_hours", 24)
+        context["auth_password_enabled"] = settings.get("auth_password_enabled", False)
+        context["auth_password_username"] = settings.get("auth_password_username", "")
+        context["admin_username"] = settings.get("auth_admin_username", "")
+
+    elif step == 7:
         # Summary - gather all configured settings from setup state
         context["plex_url"] = settings.get("PLEX_URL", "")
         context["libraries_count"] = len(settings.get("valid_sections", []))
         context["path_mappings_count"] = len(settings.get("path_mappings", []))
         context["users_count"] = len(settings.get("users", [])) + 1  # +1 for main account
+        context["auth_enabled"] = settings.get("auth_enabled", False)
 
     return templates.TemplateResponse(f"setup/step{step}.html", context)
 
@@ -170,7 +179,7 @@ def setup_step2_post(
                 "request": request,
                 "page_title": "Setup",
                 "step": 2,
-                "total_steps": 6,
+                "total_steps": 7,
                 "plex_url": plex_url,
                 "plex_token": plex_token,
                 "error": f"Could not connect to Plex: {str(e)}"
@@ -442,6 +451,63 @@ async def setup_step5_post(request: Request):
     })
 
     return RedirectResponse(url="/setup?step=6", status_code=303)
+
+
+@router.post("/setup/step6", response_class=HTMLResponse)
+async def setup_step6_post(request: Request):
+    """Handle step 6 (Security) form submission"""
+    form_data = await request.form()
+
+    auth_enabled = form_data.get("auth_enabled") == "on"
+
+    # Clear all auth keys so toggling off doesn't leave stale data
+    auth_state = {
+        "auth_enabled": auth_enabled,
+        "auth_session_hours": 24,
+        "auth_admin_plex_id": "",
+        "auth_admin_username": "",
+        "auth_password_enabled": False,
+        "auth_password_username": "",
+        "auth_password_hash": "",
+        "auth_password_salt": "",
+    }
+
+    if auth_enabled:
+        auth_state["auth_session_hours"] = int(form_data.get("auth_session_hours") or 24)
+
+        # Capture admin identity using the Plex token from step 2
+        plex_token = _setup_state.get("PLEX_TOKEN", "")
+        if plex_token:
+            try:
+                from plexapi.myplex import MyPlexAccount
+                account = MyPlexAccount(token=plex_token)
+                account_id = str(account.id) if hasattr(account, 'id') else ""
+                username = account.username if hasattr(account, 'username') else ""
+
+                if account_id:
+                    auth_state["auth_admin_plex_id"] = account_id
+                    auth_state["auth_admin_username"] = username
+            except Exception:
+                pass
+
+        # Password fallback — only save credentials when toggle is on
+        password_enabled = form_data.get("auth_password_enabled") == "on"
+        auth_state["auth_password_enabled"] = password_enabled
+
+        if password_enabled:
+            pw_username = form_data.get("auth_password_username", "").strip()
+            pw_password = form_data.get("auth_password", "").strip()
+
+            if pw_username:
+                auth_state["auth_password_username"] = pw_username
+            if pw_password:
+                from web.services.auth_service import AuthService
+                pw_hash, pw_salt = AuthService.hash_password(pw_password)
+                auth_state["auth_password_hash"] = pw_hash
+                auth_state["auth_password_salt"] = pw_salt
+
+    update_setup_state(auth_state)
+    return RedirectResponse(url="/setup?step=7", status_code=303)
 
 
 @router.post("/setup/complete", response_class=HTMLResponse)

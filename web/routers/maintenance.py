@@ -214,12 +214,24 @@ def run_audit(request: Request, refresh: bool = Query(default=False, description
     # Calculate cache age display
     cache_age = format_cache_age(updated_at)
 
+    # Load cached duplicate scan data for health card (zero API overhead)
+    dup_summary = {"duplicate_count": 0, "orphan_count": 0, "orphan_bytes_display": None}
+    try:
+        dup_results = get_duplicate_service().load_scan_results()
+        if dup_results is not None:
+            dup_summary["duplicate_count"] = dup_results.duplicate_count
+            dup_summary["orphan_count"] = dup_results.orphan_count
+            dup_summary["orphan_bytes_display"] = dup_results.orphan_bytes_display
+    except Exception:
+        pass
+
     response = templates.TemplateResponse(
         "maintenance/partials/audit_results.html",
         {
             "request": request,
             "results": results,
             "cache_age": cache_age or "just now",
+            "dup_summary": dup_summary,
         }
     )
     # Prevent browser caching so refresh button always fetches fresh data

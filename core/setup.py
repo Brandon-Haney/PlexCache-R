@@ -33,6 +33,11 @@ def write_settings(filename, data):
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4)
+        # Restrict permissions — settings contain secrets (Plex token, password hashes)
+        try:
+            os.chmod(filename, 0o600)
+        except OSError:
+            pass  # Non-fatal (Windows, Docker with different uid)
     except (IOError, OSError) as e:
         print(f"Error writing settings file: {e}")
         raise

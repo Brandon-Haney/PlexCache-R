@@ -180,8 +180,7 @@ async def setup_redirect_middleware(request: Request, call_next):
     path = request.url.path
     if (path.startswith("/setup") or
         path.startswith("/static") or
-        path.startswith("/api/health") or
-        path.startswith("/api/status")):
+        path.startswith("/api/health")):
         return await call_next(request)
 
     # Check if setup is complete
@@ -208,13 +207,16 @@ async def auth_middleware(request: Request, call_next):
 
     # Exempt paths
     if (path.startswith("/auth/") or
-        path.startswith("/setup") or
         path.startswith("/static") or
-        path.startswith("/api/health") or
-        path.startswith("/api/status")):
+        path.startswith("/api/health")):
         return await call_next(request)
 
-    # Exempt WebSocket upgrades
+    # Setup wizard: only exempt from auth before initial setup is complete
+    if path.startswith("/setup") and not setup.is_setup_complete():
+        return await call_next(request)
+
+    # WebSocket upgrades bypass HTTP middleware (can't return 302/401).
+    # Each WebSocket handler must validate auth independently.
     if request.headers.get("upgrade", "").lower() == "websocket":
         return await call_next(request)
 
@@ -291,6 +293,16 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self' ws: wss:; "
+        "font-src 'self'"
+    )
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
     return response
 
 

@@ -100,6 +100,11 @@ class SettingsService:
         try:
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2)
+            # Restrict permissions — settings contain secrets (Plex token, password hashes)
+            try:
+                os.chmod(self.settings_file, 0o600)
+            except OSError:
+                pass  # Non-fatal (Windows, Docker with different uid)
             self._cached_settings = None  # Invalidate cache
             return True
         except IOError:

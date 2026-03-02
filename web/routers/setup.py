@@ -25,6 +25,14 @@ _oauth_state: Dict[str, Any] = {}
 _setup_state: Dict[str, Any] = {}
 
 
+def _safe_int(value, default: int) -> int:
+    """Parse integer from form value with fallback to default."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def get_setup_state() -> Dict[str, Any]:
     """Get the current in-memory setup state"""
     return _setup_state
@@ -423,11 +431,11 @@ async def setup_step5_post(request: Request):
     watched_move = form_data.get("watched_move") == "on"
 
     # Parse numeric values with defaults
-    number_episodes = int(form_data.get("number_episodes") or 6)
-    days_to_monitor = int(form_data.get("days_to_monitor") or 183)
-    watchlist_episodes = int(form_data.get("watchlist_episodes") or 3)
-    watchlist_retention_days = int(form_data.get("watchlist_retention_days") or 0)
-    cache_retention_hours = int(form_data.get("cache_retention_hours") or 12)
+    number_episodes = _safe_int(form_data.get("number_episodes"), 6)
+    days_to_monitor = _safe_int(form_data.get("days_to_monitor"), 183)
+    watchlist_episodes = _safe_int(form_data.get("watchlist_episodes"), 3)
+    watchlist_retention_days = _safe_int(form_data.get("watchlist_retention_days"), 0)
+    cache_retention_hours = _safe_int(form_data.get("cache_retention_hours"), 12)
     cache_limit = form_data.get("cache_limit", "").strip()
 
     # Store in memory (not to disk yet)
@@ -592,6 +600,12 @@ def oauth_poll(client_id: str = Query(...)):
         return JSONResponse({"success": False, "error": "Invalid client ID"})
 
     state = _oauth_state[client_id]
+
+    # Reject expired OAuth state (10-minute window)
+    if time.time() - state.get("created", 0) > 600:
+        del _oauth_state[client_id]
+        return JSONResponse({"success": False, "error": "OAuth session expired, please try again"})
+
     pin_id = state["pin_id"]
 
     headers = {

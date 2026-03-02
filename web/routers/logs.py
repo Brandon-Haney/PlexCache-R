@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
@@ -227,12 +228,37 @@ async def websocket_logs(websocket: WebSocket):
         filename: log filename (for source=file)
         lines: initial lines to send (for source=file, default 100)
     """
+    # Validate Origin header to prevent cross-origin WebSocket connections
+    origin = websocket.headers.get("origin")
+    if origin:
+        expected_host = (
+            websocket.headers.get("x-forwarded-host", "").split(",")[0].strip()
+            or websocket.headers.get("host", "")
+        )
+        origin_host = urlparse(origin).netloc
+        if origin_host and expected_host and origin_host != expected_host:
+            logger.warning(f"WebSocket rejected: origin={origin_host}, expected={expected_host}")
+            await websocket.close(code=1008, reason="Origin not allowed")
+            return
+
+    # Authenticate WebSocket connections when auth is enabled
+    from web.services.auth_service import get_auth_service
+    auth_service = get_auth_service()
+    if auth_service.is_auth_enabled():
+        token = websocket.cookies.get("plexcache_session")
+        if not token or not auth_service.validate_session(token):
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+
     await websocket.accept()
 
     params = websocket.query_params
     source = params.get('source', 'live')
     filename = params.get('filename', '')
-    initial_lines = int(params.get('lines', '100'))
+    try:
+        initial_lines = int(params.get('lines', '100'))
+    except (TypeError, ValueError):
+        initial_lines = 100
 
     try:
         if source == 'file':

@@ -18,6 +18,14 @@ from web.services.web_cache import get_web_cache_service, CACHE_KEY_DASHBOARD_ST
 router = APIRouter()
 
 
+def _safe_int(value, default: int) -> int:
+    """Parse integer from form/query value with fallback to default."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _get_dashboard_stats_data(use_cache: bool = True) -> tuple[dict, str | None]:
     """Get dashboard stats, optionally from cache. Returns (stats, cache_age)"""
     web_cache = get_web_cache_service()
@@ -276,7 +284,7 @@ async def save_schedule_settings(request: Request):
     config = ScheduleConfig(
         enabled=form.get("enabled") == "on",
         schedule_type=form.get("schedule_type", "interval"),
-        interval_hours=int(form.get("interval_hours", 4)),
+        interval_hours=_safe_int(form.get("interval_hours"), 4),
         interval_start_time=form.get("interval_start_time", "00:00"),
         cron_expression=form.get("cron_expression", "0 */4 * * *"),
         dry_run=form.get("dry_run") == "on",
@@ -418,26 +426,10 @@ def health_check():
     """
     Health check endpoint for Docker container monitoring.
 
-    Returns basic health status for container orchestration (Docker, Kubernetes, etc.).
-    Used by Docker HEALTHCHECK and external monitoring tools.
+    Returns minimal status for container orchestration (Docker, Kubernetes, etc.).
+    Used by Docker HEALTHCHECK — kept intentionally lean to avoid information disclosure.
     """
-    settings_service = get_settings_service()
-    scheduler_service = get_scheduler_service()
-    operation_runner = get_operation_runner()
-
-    # Check Plex connection (cached, won't block)
-    plex_connected = settings_service.check_plex_connection()
-
-    # Get scheduler status
-    schedule_status = scheduler_service.get_status()
-
-    return {
-        "status": "healthy",
-        "version": PLEXCACHE_PRODUCT_VERSION,
-        "plex_connected": plex_connected,
-        "scheduler_running": schedule_status.get("running", False),
-        "operation_running": operation_runner.is_running,
-    }
+    return {"status": "healthy"}
 
 
 @router.get("/status")

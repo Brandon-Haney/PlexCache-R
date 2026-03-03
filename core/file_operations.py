@@ -103,6 +103,21 @@ def is_directory_level_file(filepath: str, parent_video: str) -> bool:
     return not os.path.basename(filepath).startswith(video_base)
 
 
+def is_season_like_folder(folder_name: str) -> bool:
+    """Check if a folder name looks like a TV season directory.
+
+    Matches: Season 01, Series 1, Specials, 01 (bare numeric).
+    Does NOT match: Movie (2020), Show Name, Extras, Behind the Scenes.
+
+    Uses the same patterns as _extract_media_name() for consistency.
+    """
+    return bool(
+        re.match(r'^(Season|Series)\s*\d+', folder_name, re.IGNORECASE)
+        or re.match(r'^\d+$', folder_name)
+        or re.match(r'^Specials$', folder_name, re.IGNORECASE)
+    )
+
+
 def format_bytes(bytes_value: int) -> str:
     """Format bytes into human-readable string (e.g., '1.5 GB').
 
@@ -841,6 +856,30 @@ class CacheTimestampTracker:
                 if path == excluding:
                     continue
                 if os.path.dirname(path) == directory and is_video_file(path):
+                    result.append(path)
+            return result
+
+    def get_other_videos_in_subdirectories(self, parent_dir: str, excluding: str) -> List[str]:
+        """Find other tracked video files in any subdirectory of a parent directory.
+
+        Used for reference counting show-root files during eviction. When a show-root
+        file (e.g., poster.jpg) is associated with an episode being evicted, this
+        checks if any other episodes from any season remain cached.
+
+        Args:
+            parent_dir: Show root directory path to check.
+            excluding: Video path to exclude from results (the video being evicted).
+
+        Returns:
+            List of other tracked video paths in subdirectories of parent_dir.
+        """
+        with self._lock:
+            result = []
+            norm_parent = os.path.normpath(parent_dir) + os.sep
+            for path in self._timestamps:
+                if path == excluding:
+                    continue
+                if os.path.normpath(path).startswith(norm_parent) and is_video_file(path):
                     result.append(path)
             return result
 
@@ -2766,6 +2805,7 @@ class SiblingFileFinder:
 
         files_to_skip = set() if files_to_skip is None else set(files_to_skip)
         processed_files = set()
+        scanned_parent_dirs: Set[str] = set()
         result: Dict[str, List[str]] = {}
 
         for file in media_files:
@@ -2779,6 +2819,18 @@ class SiblingFileFinder:
                 sibling_files = self._find_sibling_files(directory_path, file)
                 for sibling_file in sibling_files:
                     logging.debug(f"Sibling found: {sibling_file}")
+
+                # TV show root scan: if this video is in a Season-like folder,
+                # also discover show-root assets (poster.jpg, fanart.jpg, etc.)
+                folder_name = os.path.basename(directory_path)
+                parent_dir = os.path.dirname(directory_path)
+                if is_season_like_folder(folder_name) and parent_dir not in scanned_parent_dirs:
+                    scanned_parent_dirs.add(parent_dir)
+                    if os.path.exists(parent_dir):
+                        parent_siblings = self._find_sibling_files(parent_dir, file)
+                        for parent_file in parent_siblings:
+                            logging.debug(f"Show root sibling found: {parent_file}")
+                        sibling_files.extend(parent_siblings)
 
             result[file] = sibling_files
 
@@ -3537,7 +3589,12 @@ class FileFilter:
                         if is_directory_level_file(assoc_file, check_path):
                             # Directory-level file: check if other videos remain
                             directory = os.path.dirname(assoc_file)
-                            others = self.timestamp_tracker.get_other_videos_in_directory(directory, excluding=check_path)
+                            video_dir = os.path.dirname(check_path)
+                            if directory != video_dir:
+                                # Cross-directory: show-root file linked to Season video
+                                others = self.timestamp_tracker.get_other_videos_in_subdirectories(directory, excluding=check_path)
+                            else:
+                                others = self.timestamp_tracker.get_other_videos_in_directory(directory, excluding=check_path)
                             # Filter out others that are also being evicted
                             remaining = [v for v in others if self._translate_to_host_path(v) not in eviction_set]
                             if remaining:

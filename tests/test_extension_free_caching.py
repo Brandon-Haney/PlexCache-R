@@ -23,6 +23,7 @@ from core.file_operations import (
     WatchlistTracker,
     is_video_file,
     is_directory_level_file,
+    is_season_like_folder,
     _get_file_category,
     find_matching_plexcached,
     PLEXCACHED_EXTENSION,
@@ -557,3 +558,340 @@ class TestRetentionDelegation:
         assert tracker.is_within_retention_period("/cache/Movie.mkv", 24)
         # Artwork should also be within retention via delegation
         assert tracker.is_within_retention_period("/cache/poster.jpg", 24)
+
+
+# ============================================================
+# is_season_like_folder tests
+# ============================================================
+
+class TestIsSeasonLikeFolder:
+    def test_season_numbered(self):
+        assert is_season_like_folder("Season 01") is True
+        assert is_season_like_folder("Season 1") is True
+        assert is_season_like_folder("Season 10") is True
+
+    def test_series_numbered(self):
+        assert is_season_like_folder("Series 1") is True
+        assert is_season_like_folder("Series 02") is True
+
+    def test_specials(self):
+        assert is_season_like_folder("Specials") is True
+        assert is_season_like_folder("specials") is True
+        assert is_season_like_folder("SPECIALS") is True
+
+    def test_bare_numeric(self):
+        assert is_season_like_folder("01") is True
+        assert is_season_like_folder("1") is True
+        assert is_season_like_folder("12") is True
+
+    def test_case_insensitive(self):
+        assert is_season_like_folder("season 01") is True
+        assert is_season_like_folder("SEASON 01") is True
+
+    def test_movie_folder_not_matched(self):
+        assert is_season_like_folder("Movie (2020)") is False
+
+    def test_show_name_not_matched(self):
+        assert is_season_like_folder("Breaking Bad") is False
+
+    def test_extras_not_matched(self):
+        assert is_season_like_folder("Extras") is False
+        assert is_season_like_folder("Behind the Scenes") is False
+
+
+# ============================================================
+# Show root directory discovery tests
+# ============================================================
+
+class TestShowRootDiscovery:
+    def test_discovers_show_root_files(self, temp_dir):
+        """Show-root assets are discovered when video is in a Season folder."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        season_dir = os.path.join(show_dir, "Season 01")
+        os.makedirs(season_dir)
+
+        video = create_test_file(os.path.join(season_dir, "S01E01.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+        fanart = create_test_file(os.path.join(show_dir, "fanart.jpg"), "img")
+        theme = create_test_file(os.path.join(show_dir, "theme.mp3"), "audio")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        siblings = result[video]
+        assert poster in siblings
+        assert fanart in siblings
+        assert theme in siblings
+
+    def test_no_parent_scan_for_movie(self, temp_dir):
+        """Movie folders do NOT trigger parent directory scan."""
+        library_dir = os.path.join(temp_dir, "Movies")
+        movie_dir = os.path.join(library_dir, "Movie (2020)")
+        os.makedirs(movie_dir)
+
+        # Put a file in the library root — should NOT be discovered
+        create_test_file(os.path.join(library_dir, "library_poster.jpg"), "img")
+        video = create_test_file(os.path.join(movie_dir, "Movie (2020).mkv"), "video")
+        poster = create_test_file(os.path.join(movie_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        siblings = result[video]
+        # Same-dir poster is found
+        assert poster in siblings
+        # Library-level file is NOT found
+        library_poster = os.path.join(library_dir, "library_poster.jpg")
+        assert library_poster not in siblings
+
+    def test_deduplication_across_episodes(self, temp_dir):
+        """Show-root files are only assigned to the first episode processed."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        season_dir = os.path.join(show_dir, "Season 01")
+        os.makedirs(season_dir)
+
+        ep1 = create_test_file(os.path.join(season_dir, "S01E01.mkv"), "video")
+        ep2 = create_test_file(os.path.join(season_dir, "S01E02.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([ep1, ep2])
+
+        # First episode gets the show-root poster
+        assert poster in result[ep1]
+        # Second episode does NOT (parent dir already scanned)
+        assert poster not in result[ep2]
+
+    def test_deduplication_across_seasons(self, temp_dir):
+        """Show-root files are not re-discovered for episodes in different seasons."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        s1_dir = os.path.join(show_dir, "Season 01")
+        s2_dir = os.path.join(show_dir, "Season 02")
+        os.makedirs(s1_dir)
+        os.makedirs(s2_dir)
+
+        ep1 = create_test_file(os.path.join(s1_dir, "S01E01.mkv"), "video")
+        ep2 = create_test_file(os.path.join(s2_dir, "S02E01.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([ep1, ep2])
+
+        # First episode gets it
+        assert poster in result[ep1]
+        # Season 02 episode does NOT re-discover
+        assert poster not in result[ep2]
+
+    def test_skips_hidden_and_plexcached_in_show_root(self, temp_dir):
+        """_find_sibling_files filtering applies to show root too."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        season_dir = os.path.join(show_dir, "Season 01")
+        os.makedirs(season_dir)
+
+        video = create_test_file(os.path.join(season_dir, "S01E01.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+        create_test_file(os.path.join(show_dir, ".hidden"), "hidden")
+        create_test_file(os.path.join(show_dir, "poster.jpg.plexcached"), "backup")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        siblings = result[video]
+        assert poster in siblings
+        names = [os.path.basename(f) for f in siblings]
+        assert ".hidden" not in names
+        assert not any(n.endswith(".plexcached") for n in names)
+
+    def test_skips_video_files_in_show_root(self, temp_dir):
+        """Video files in the show root are NOT included as siblings."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        season_dir = os.path.join(show_dir, "Season 01")
+        os.makedirs(season_dir)
+
+        video = create_test_file(os.path.join(season_dir, "S01E01.mkv"), "video")
+        create_test_file(os.path.join(show_dir, "trailer.mkv"), "trailer")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        siblings = result[video]
+        assert poster in siblings
+        # Video files in show root are excluded by _find_sibling_files
+        assert not any(is_video_file(s) for s in siblings)
+
+    def test_skips_subdirectories_in_show_root(self, temp_dir):
+        """Subdirectories (Season folders) are not included as siblings."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        season_dir = os.path.join(show_dir, "Season 01")
+        os.makedirs(os.path.join(show_dir, "Season 02"))  # Another season dir
+        os.makedirs(season_dir)
+
+        video = create_test_file(os.path.join(season_dir, "S01E01.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        siblings = result[video]
+        # Only files, no directories
+        assert poster in siblings
+        for s in siblings:
+            assert os.path.isfile(s)
+
+    def test_specials_folder_triggers_parent_scan(self, temp_dir):
+        """Specials/ is a season-like folder and triggers show root scan."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        specials_dir = os.path.join(show_dir, "Specials")
+        os.makedirs(specials_dir)
+
+        video = create_test_file(os.path.join(specials_dir, "Special01.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        assert poster in result[video]
+
+    def test_bare_numeric_folder_triggers_parent_scan(self, temp_dir):
+        """Bare numeric folder (e.g., '01') triggers show root scan."""
+        show_dir = os.path.join(temp_dir, "Show Name")
+        numeric_dir = os.path.join(show_dir, "01")
+        os.makedirs(numeric_dir)
+
+        video = create_test_file(os.path.join(numeric_dir, "S01E01.mkv"), "video")
+        poster = create_test_file(os.path.join(show_dir, "poster.jpg"), "img")
+
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        assert poster in result[video]
+
+
+# ============================================================
+# Show root eviction reference counting tests
+# ============================================================
+
+class TestShowRootEviction:
+    def test_get_other_videos_in_subdirectories(self, temp_dir):
+        """Finds videos across multiple season subdirectories."""
+        ts_file = os.path.join(temp_dir, "timestamps.json")
+        data = {
+            "/cache/Show/Season 1/S01E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            },
+            "/cache/Show/Season 1/S01E02.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            },
+            "/cache/Show/Season 2/S02E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            }
+        }
+        with open(ts_file, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        tracker = CacheTimestampTracker(ts_file)
+        others = tracker.get_other_videos_in_subdirectories(
+            "/cache/Show",
+            excluding="/cache/Show/Season 1/S01E01.mkv"
+        )
+        assert "/cache/Show/Season 1/S01E02.mkv" in others
+        assert "/cache/Show/Season 2/S02E01.mkv" in others
+        assert "/cache/Show/Season 1/S01E01.mkv" not in others
+
+    def test_empty_when_last_episode(self, temp_dir):
+        """Returns empty when the excluded video is the only one."""
+        ts_file = os.path.join(temp_dir, "timestamps.json")
+        data = {
+            "/cache/Show/Season 1/S01E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            }
+        }
+        with open(ts_file, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        tracker = CacheTimestampTracker(ts_file)
+        others = tracker.get_other_videos_in_subdirectories(
+            "/cache/Show",
+            excluding="/cache/Show/Season 1/S01E01.mkv"
+        )
+        assert others == []
+
+    def test_does_not_match_sibling_shows(self, temp_dir):
+        """Videos from a different show under the same library root are NOT matched."""
+        ts_file = os.path.join(temp_dir, "timestamps.json")
+        data = {
+            "/cache/TV/Show A/Season 1/S01E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            },
+            "/cache/TV/Show B/Season 1/S01E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            }
+        }
+        with open(ts_file, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        tracker = CacheTimestampTracker(ts_file)
+        others = tracker.get_other_videos_in_subdirectories(
+            "/cache/TV/Show A",
+            excluding="/cache/TV/Show A/Season 1/S01E01.mkv"
+        )
+        # Show B's episode should NOT appear
+        assert others == []
+
+    def test_show_root_poster_survives_single_eviction(self, temp_dir):
+        """Show-root poster is reassociated when one episode is evicted but others remain."""
+        ts_file = os.path.join(temp_dir, "timestamps.json")
+        data = {
+            "/cache/Show/Season 1/S01E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck",
+                "associated_files": ["/cache/Show/poster.jpg"]
+            },
+            "/cache/Show/Season 1/S01E02.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck"
+            }
+        }
+        with open(ts_file, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        tracker = CacheTimestampTracker(ts_file)
+
+        # Simulate eviction reference counting: poster.jpg is in show root,
+        # video is in Season 1. Directories differ → use subdirectory check.
+        assoc_file = "/cache/Show/poster.jpg"
+        check_path = "/cache/Show/Season 1/S01E01.mkv"
+        directory = os.path.dirname(assoc_file)  # /cache/Show
+        video_dir = os.path.dirname(check_path)  # /cache/Show/Season 1
+
+        assert directory != video_dir
+        others = tracker.get_other_videos_in_subdirectories(directory, excluding=check_path)
+        assert len(others) == 1
+        assert "/cache/Show/Season 1/S01E02.mkv" in others
+
+        # Reassociate poster to remaining episode
+        tracker.reassociate_file(assoc_file, from_parent=check_path, to_parent=others[0])
+        assert tracker.find_parent_video(assoc_file) == "/cache/Show/Season 1/S01E02.mkv"
+
+    def test_show_root_poster_evicted_with_last_episode(self, temp_dir):
+        """Show-root poster is evicted when the last episode is evicted."""
+        ts_file = os.path.join(temp_dir, "timestamps.json")
+        data = {
+            "/cache/Show/Season 1/S01E01.mkv": {
+                "cached_at": "2025-12-01T10:00:00",
+                "source": "ondeck",
+                "associated_files": ["/cache/Show/poster.jpg"]
+            }
+        }
+        with open(ts_file, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        tracker = CacheTimestampTracker(ts_file)
+
+        assoc_file = "/cache/Show/poster.jpg"
+        check_path = "/cache/Show/Season 1/S01E01.mkv"
+        directory = os.path.dirname(assoc_file)
+
+        others = tracker.get_other_videos_in_subdirectories(directory, excluding=check_path)
+        # No other episodes — poster should be evicted
+        assert others == []

@@ -14,7 +14,7 @@
     </td>
 </tr>
 {% for item in group.list %}
-<tr data-action="{{ item.action }}" data-date-group="{{ item.date_key }}">
+<tr data-action="{{ item.action }}" data-date-group="{{ item.date_key }}"{% if item.associated_files %} class="af-parent" onclick="this.classList.toggle('af-expanded'); var s=this.nextElementSibling; while(s && s.classList.contains('associated-sub-row')){s.classList.toggle('af-visible'); s=s.nextElementSibling;}"{% endif %}>
     <td>{{ item.time_display }}</td>
     <td>
         {% if item.action in ('Cached', 'Protected', 'Fixed') %}
@@ -43,8 +43,7 @@
     <td>
         {{ item.size }}
         {% if item.associated_files %}
-        <span class="badge badge-muted badge-sm associated-files-badge"
-              onclick="this.closest('tr').classList.toggle('af-expanded'); var s=this.closest('tr').nextElementSibling; while(s && s.classList.contains('associated-sub-row')){s.classList.toggle('af-visible'); s=s.nextElementSibling;}">
+        <span class="badge badge-muted badge-sm associated-files-badge">
             +{{ item.associated_files|length }}
         </span>
         {% endif %}

@@ -61,10 +61,10 @@
         <nav class="sidebar">
             <div class="sidebar-brand">
                 <div class="sidebar-brand-icon"><i data-lucide="hard-drive"></i></div>
-                <span>PlexCache-D</span>
-                {% if image_tag is defined and image_tag != 'latest' %}
-                <span class="dev-badge">{{ image_tag | upper }}</span>
-                {% endif %}
+                <div class="sidebar-brand-text">
+                    <span>PlexCache-D</span>
+                    <small class="sidebar-brand-version">v{{ product_version }}{% if tag_label %} <span class="dev-badge">{{ tag_label }}</span>{% endif %}</small>
+                </div>
             </div>
             <ul class="sidebar-nav">
                 <li>

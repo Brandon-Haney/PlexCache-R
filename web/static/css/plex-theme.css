@@ -25,7 +25,7 @@ body {
     --plex-warning: #ff9800;
     --plex-error: #FF453A;
     --plex-info: #0A84FF;
-    --sidebar-width: 240px;
+    --sidebar-width: 200px;
     --sidebar-collapsed: 60px;
 
     /* Color aliases for convenience */

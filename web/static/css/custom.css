@@ -880,6 +880,21 @@ footer {
     flex-shrink: 0;
     margin-left: auto;
 }
+.di-file-row__assoc-badge {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.3);
+    flex-shrink: 0;
+}
+.di-file-row--sub {
+    padding-left: 1.25rem;
+    font-size: 0.65rem;
+    opacity: 0.55;
+}
+.di-sub-arrow {
+    color: rgba(255,255,255,0.25);
+    flex-shrink: 0;
+    font-size: 0.7rem;
+}
 
 /* ── Buttons ─────────────────────────────────────────── */
 

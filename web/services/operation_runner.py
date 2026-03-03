@@ -906,9 +906,47 @@ class OperationRunner:
                 activities = [a for i, a in enumerate(activities) if i not in merged_indices]
                 _save_activity_unlocked(activities)
 
-        # Update in-memory list
+        # Update in-memory list and merge _current_run_files for banner pill
         with self._lock:
             self._recent_activity = activities
+            self._merge_run_files(sibling_to_parent, _COMPATIBLE_ACTIONS)
+
+    def _merge_run_files(self, sibling_to_parent: Dict[str, str], compatible_actions: dict) -> None:
+        """Merge sibling entries in _current_run_files (banner pill detail view).
+
+        Caller MUST hold self._lock.
+        """
+        if not self._current_run_files:
+            return
+
+        # Index parents by (filename, action)
+        parent_index: Dict[tuple, int] = {}
+        for i, f in enumerate(self._current_run_files):
+            key = (f["filename"], f["action"])
+            if key not in parent_index:
+                parent_index[key] = i
+
+        merged_indices: set = set()
+        for i, f in enumerate(self._current_run_files):
+            if f["filename"] in sibling_to_parent:
+                parent_basename = sibling_to_parent[f["filename"]]
+                compatible = compatible_actions.get(f["action"], (f["action"],))
+                for try_action in compatible:
+                    parent_key = (parent_basename, try_action)
+                    if parent_key in parent_index:
+                        parent_idx = parent_index[parent_key]
+                        parent_entry = self._current_run_files[parent_idx]
+                        if "associated_files" not in parent_entry:
+                            parent_entry["associated_files"] = []
+                        parent_entry["associated_files"].append({
+                            "filename": f["filename"],
+                            "size": f.get("size", ""),
+                        })
+                        merged_indices.add(i)
+                        break
+
+        if merged_indices:
+            self._current_run_files = [f for i, f in enumerate(self._current_run_files) if i not in merged_indices]
 
     def get_status_dict(self) -> dict:
         """Get status as a dictionary for API responses"""

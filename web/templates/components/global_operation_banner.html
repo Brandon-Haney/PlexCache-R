@@ -755,7 +755,17 @@ function dismissMaintCompletionBanner() {
                 <span class="di-action-tag {{ 'di-action-tag--cached' if f.action == 'Cached' else 'di-action-tag--restored' }}">{{ f.action|upper }}</span>
                 <span class="di-file-row__name">{{ f.filename|truncate(55, True, '...') }}</span>
                 {% if f.size and f.size != '-' %}<span class="di-file-row__size">{{ f.size }}</span>{% endif %}
+                {% if f.associated_files is defined and f.associated_files %}<span class="di-file-row__assoc-badge">+{{ f.associated_files|length }}</span>{% endif %}
             </div>
+            {%- if f.associated_files is defined and f.associated_files %}
+            {%- for af in f.associated_files %}
+            <div class="di-file-row di-file-row--sub">
+                <span class="di-sub-arrow">&#8627;</span>
+                <span class="di-file-row__name">{{ af.filename|truncate(55, True, '...') }}</span>
+                {% if af.size %}<span class="di-file-row__size">{{ af.size }}</span>{% endif %}
+            </div>
+            {%- endfor %}
+            {%- endif %}
             {%- endfor %}
             {%- endif %}
             <div class="di-divider"></div>
@@ -879,7 +889,9 @@ function dismissMaintCompletionBanner() {
     // File detail rows
     var recentFiles = [
         {% for f in status.recent_files|default([]) %}
-        { action: '{{ f.action }}', filename: '{{ f.filename|truncate(45, True, "...")|e }}', size: '{{ f.size }}' },
+        { action: '{{ f.action }}', filename: '{{ f.filename|truncate(45, True, "...")|e }}', size: '{{ f.size }}', associatedFiles: [
+            {%- if f.associated_files is defined and f.associated_files %}{% for af in f.associated_files %}{ filename: '{{ af.filename|truncate(45, True, "...")|e }}', size: '{{ af.size }}' },{% endfor %}{% endif -%}
+        ] },
         {% endfor %}
     ];
     var detailHtml = '';
@@ -889,11 +901,20 @@ function dismissMaintCompletionBanner() {
         detailHtml = '<div class="di-pill__detail"><div class="di-divider"></div>';
         recentFiles.forEach(function(f) {
             var tagClass = f.action === 'Cached' ? 'di-action-tag--cached' : 'di-action-tag--restored';
+            var assocBadge = f.associatedFiles.length > 0 ? '<span class="di-file-row__assoc-badge">+' + f.associatedFiles.length + '</span>' : '';
             detailHtml += '<div class="di-file-row">' +
                 '<span class="di-action-tag ' + tagClass + '">' + f.action.toUpperCase() + '</span>' +
                 '<span class="di-file-row__name">' + f.filename + '</span>' +
                 (f.size !== '-' ? '<span class="di-file-row__size">' + f.size + '</span>' : '') +
+                assocBadge +
                 '</div>';
+            f.associatedFiles.forEach(function(af) {
+                detailHtml += '<div class="di-file-row di-file-row--sub">' +
+                    '<span class="di-sub-arrow">&#8627;</span>' +
+                    '<span class="di-file-row__name">' + af.filename + '</span>' +
+                    (af.size ? '<span class="di-file-row__size">' + af.size + '</span>' : '') +
+                    '</div>';
+            });
         });
         var totalFiles = filesCached + filesRestored;
         if (totalFiles > recentFiles.length) {

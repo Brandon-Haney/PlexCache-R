@@ -44,12 +44,23 @@
         {{ item.size }}
         {% if item.associated_files %}
         <span class="badge badge-muted badge-sm associated-files-badge"
-              title="{% for af in item.associated_files %}{{ af.filename }}{% if af.size %} ({{ af.size }}){% endif %}{% if not loop.last %}&#10;{% endif %}{% endfor %}">
+              onclick="this.closest('tr').classList.toggle('af-expanded'); var s=this.closest('tr').nextElementSibling; while(s && s.classList.contains('associated-sub-row')){s.classList.toggle('af-visible'); s=s.nextElementSibling;}">
             +{{ item.associated_files|length }}
         </span>
         {% endif %}
     </td>
 </tr>
+{% if item.associated_files %}
+{% for af in item.associated_files %}
+<tr class="associated-sub-row" data-action="{{ item.action }}" data-date-group="{{ item.date_key }}">
+    <td></td>
+    <td></td>
+    <td class="associated-sub-file" title="{{ af.filename }}"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</td>
+    <td></td>
+    <td class="associated-sub-size">{{ af.size if af.size else '-' }}</td>
+</tr>
+{% endfor %}
+{% endif %}
 {% endfor %}
 {% endfor %}
 {% else %}

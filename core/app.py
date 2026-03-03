@@ -19,7 +19,7 @@ from core.config import ConfigManager
 from core.logging_config import LoggingManager, reset_warning_error_flag
 from core.system_utils import SystemDetector, FileUtils, SingleInstanceLock, get_disk_usage, get_array_direct_path, detect_zfs, set_zfs_prefixes, format_bytes
 from core.plex_api import PlexManager, OnDeckItem
-from core.file_operations import MultiPathModifier, SubtitleFinder, FileFilter, FileMover, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration, get_media_identity, find_matching_plexcached
+from core.file_operations import MultiPathModifier, SiblingFileFinder, FileFilter, FileMover, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration, get_media_identity, find_matching_plexcached, is_directory_level_file
 
 
 class PlexCacheApp:
@@ -47,7 +47,7 @@ class PlexCacheApp:
         self.logging_manager = None
         self.plex_manager = None
         self.file_path_modifier = None
-        self.subtitle_finder = None
+        self.sibling_finder = None
         self.file_filter = None
         self.file_mover = None
         
@@ -60,7 +60,7 @@ class PlexCacheApp:
         self.watchlist_items = set()
         self.source_map = {}  # Maps file paths to source ('ondeck' or 'watchlist')
         self.media_info_map = {}  # Maps file paths to Plex media type info
-        self.subtitle_map: Dict[str, List[str]] = {}  # Maps video real paths to subtitle paths
+        self.sibling_map: Dict[str, List[str]] = {}  # Maps video real paths to sibling file paths
         # Tracking for restore vs move operations (for summary)
         self.restored_count = 0
         self.restored_bytes = 0
@@ -467,7 +467,7 @@ class PlexCacheApp:
             logging.info("[CONFIG] These are deprecated and can be removed from your settings file.")
             logging.info("[CONFIG] Path conversion now uses path_mappings exclusively.")
 
-        self.subtitle_finder = SubtitleFinder()
+        self.sibling_finder = SiblingFileFinder()
 
     def _init_trackers(self, mover_exclude, timestamp_file) -> None:
         """Initialize timestamp, watchlist, and OnDeck trackers."""
@@ -1030,19 +1030,19 @@ class PlexCacheApp:
             logging.info("Operation stopped during media processing")
             return
 
-        # Fetch subtitles for OnDeck media (already using real paths)
-        logging.debug("Finding subtitles for OnDeck media...")
-        ondeck_subtitle_map = self.subtitle_finder.get_media_subtitles_grouped(list(self.ondeck_items), files_to_skip=set(self.files_to_skip))
-        self.subtitle_map.update(ondeck_subtitle_map)
-        subtitle_count = sum(len(subs) for subs in ondeck_subtitle_map.values())
-        # Add all subtitles to the modified paths set
-        for subs in ondeck_subtitle_map.values():
-            modified_paths_set.update(subs)
-        logging.debug(f"Found {subtitle_count} subtitle files for OnDeck media")
+        # Fetch sibling files for OnDeck media (already using real paths)
+        logging.debug("Finding sibling files for OnDeck media...")
+        ondeck_sibling_map = self.sibling_finder.get_media_siblings_grouped(list(self.ondeck_items), files_to_skip=set(self.files_to_skip))
+        self.sibling_map.update(ondeck_sibling_map)
+        sibling_count = sum(len(siblings) for siblings in ondeck_sibling_map.values())
+        # Add all siblings to the modified paths set
+        for siblings in ondeck_sibling_map.values():
+            modified_paths_set.update(siblings)
+        logging.debug(f"Found {sibling_count} sibling files for OnDeck media")
 
-        # Track source for OnDeck subtitles
-        for subs in ondeck_subtitle_map.values():
-            for item in subs:
+        # Track source for OnDeck siblings
+        for siblings in ondeck_sibling_map.values():
+            for item in siblings:
                 if item not in self.source_map:
                     self.source_map[item] = "ondeck"
 
@@ -1225,10 +1225,10 @@ class PlexCacheApp:
                 }
 
             result_set.update(modified_items)
-            watchlist_subtitle_map = self.subtitle_finder.get_media_subtitles_grouped(modified_items, files_to_skip=set(self.files_to_skip))
-            self.subtitle_map.update(watchlist_subtitle_map)
-            for subs in watchlist_subtitle_map.values():
-                result_set.update(subs)
+            watchlist_sibling_map = self.sibling_finder.get_media_siblings_grouped(modified_items, files_to_skip=set(self.files_to_skip))
+            self.sibling_map.update(watchlist_sibling_map)
+            for siblings in watchlist_sibling_map.values():
+                result_set.update(siblings)
 
         except Exception as e:
             logging.exception(f"An error occurred while processing the watchlist: {type(e).__name__}: {e}")
@@ -1601,11 +1601,11 @@ class PlexCacheApp:
                 logging.info(f"  ...and {len(self.media_to_cache) - 6} more")
         self._safe_move_files(self.media_to_cache, 'cache')
 
-        # Associate subtitles with their parent videos in the timestamp tracker
-        if self.timestamp_tracker and self.subtitle_map:
-            cache_subtitle_map: Dict[str, List[str]] = {}
-            for real_video, real_subs in self.subtitle_map.items():
-                if not real_subs:
+        # Associate sibling files with their parent videos in the timestamp tracker
+        if self.timestamp_tracker and self.sibling_map:
+            cache_sibling_map: Dict[str, List[str]] = {}
+            for real_video, real_siblings in self.sibling_map.items():
+                if not real_siblings:
                     continue
                 # Convert real paths to cache paths
                 cache_video = None
@@ -1617,23 +1617,23 @@ class PlexCacheApp:
                         self.config_manager.paths.cache_dir, 1
                     )
                 if cache_video:
-                    cache_subs = []
-                    for real_sub in real_subs:
+                    cache_siblings = []
+                    for real_sibling in real_siblings:
                         if self.file_mover and self.file_mover.path_modifier:
-                            cache_sub, _ = self.file_mover.path_modifier.convert_real_to_cache(real_sub)
+                            cache_sibling, _ = self.file_mover.path_modifier.convert_real_to_cache(real_sibling)
                         elif self.config_manager.paths.real_source and self.config_manager.paths.cache_dir:
-                            cache_sub = real_sub.replace(
+                            cache_sibling = real_sibling.replace(
                                 self.config_manager.paths.real_source,
                                 self.config_manager.paths.cache_dir, 1
                             )
                         else:
-                            cache_sub = None
-                        if cache_sub:
-                            cache_subs.append(cache_sub)
-                    if cache_subs:
-                        cache_subtitle_map[cache_video] = cache_subs
-            if cache_subtitle_map:
-                self.timestamp_tracker.associate_subtitles(cache_subtitle_map)
+                            cache_sibling = None
+                        if cache_sibling:
+                            cache_siblings.append(cache_sibling)
+                    if cache_siblings:
+                        cache_sibling_map[cache_video] = cache_siblings
+            if cache_sibling_map:
+                self.timestamp_tracker.associate_files(cache_sibling_map)
 
         # Enrich pre-existing cached files with media type metadata
         # Files already on cache were recorded as "pre-existing" without media_type.

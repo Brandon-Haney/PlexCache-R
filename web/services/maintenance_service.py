@@ -20,17 +20,18 @@ from core.file_operations import PLEXCACHED_EXTENSION, VIDEO_EXTENSIONS, SUBTITL
 def _strip_plexcached(path: str) -> str:
     """Safely strip .plexcached suffix from a path.
 
-    Returns the original path (with media extension intact).
-    Raises ValueError if the result would lack a media extension,
-    which indicates a malformed .plexcached file.
+    Returns the original path (with file extension intact).
+    Raises ValueError if the result would have no file extension at all,
+    which indicates a malformed .plexcached file (e.g., 'MovieName.plexcached'
+    instead of 'MovieName.mkv.plexcached').
     """
     if not path.endswith(PLEXCACHED_EXTENSION):
         raise ValueError(f"Not a .plexcached file: {path}")
     original = path[:-len(PLEXCACHED_EXTENSION)]
     _, ext = os.path.splitext(original)
-    if ext.lower() not in VIDEO_EXTENSIONS:
+    if not ext:
         raise ValueError(
-            f"Malformed .plexcached file (no media extension): {os.path.basename(path)}"
+            f"Malformed .plexcached file (no file extension): {os.path.basename(path)}"
         )
     return original
 
@@ -400,10 +401,9 @@ class MaintenanceService:
         return results
 
     def get_cache_files(self) -> Set[str]:
-        """Get all media files currently on cache"""
+        """Get all files currently on cache (videos, subtitles, artwork, metadata, etc.)"""
         cache_dirs, _ = self._get_paths()
         cache_files = set()
-        extensions = tuple(MEDIA_EXTENSIONS)
 
         def _walk_error(err):
             logging.warning(f"Permission error scanning directory: {err}")
@@ -414,7 +414,7 @@ class MaintenanceService:
                     # Prune excluded directories (modifying dirs in-place skips them)
                     dirs[:] = [d for d in dirs if not self._should_skip_directory(d)]
                     for f in files:
-                        if f.lower().endswith(extensions):
+                        if not f.startswith('.'):
                             cache_files.add(os.path.join(root, f))
 
         return cache_files
@@ -635,28 +635,31 @@ class MaintenanceService:
                         try:
                             original_name = _strip_plexcached(f)
                         except ValueError:
-                            # Malformed .plexcached (no media extension)
-                            # Check if a media sibling exists — if so, we can repair the backup
+                            # Malformed .plexcached (no file extension)
+                            # Check if a sibling file exists — if so, we can repair the backup
                             # by renaming e.g. "Name.plexcached" → "Name.mkv.plexcached"
                             #
-                            # The sibling .mkv may be on the array (file_set) OR on the cache
-                            # (cache_files). After Sonarr/Radarr renames, the .mkv typically
+                            # The sibling may be on the array (file_set) OR on the cache
+                            # (cache_files). After Sonarr/Radarr renames, the file typically
                             # lives on cache while the malformed .plexcached is on the array.
                             stem = f[:-len(PLEXCACHED_EXTENSION)]  # strip .plexcached
                             repair_ext = None
-                            for ext in VIDEO_EXTENSIONS:
-                                # Check array sibling first
-                                if (stem + ext) in file_set:
-                                    repair_ext = ext
-                                    break
-                                # Check corresponding cache path
-                                relative = os.path.relpath(
-                                    os.path.join(root, stem + ext), array_dir
-                                )
-                                cache_candidate = os.path.join(cache_dir, relative)
-                                if cache_candidate in cache_files:
-                                    repair_ext = ext
-                                    break
+                            # Search for any sibling file that shares this stem
+                            for candidate in file_set:
+                                if candidate.startswith(stem) and candidate != f:
+                                    _, cand_ext = os.path.splitext(candidate)
+                                    if cand_ext and candidate == stem + cand_ext:
+                                        repair_ext = cand_ext
+                                        break
+                            if not repair_ext:
+                                # Check corresponding cache paths
+                                for cache_file in cache_files:
+                                    cache_basename = os.path.basename(cache_file)
+                                    if cache_basename.startswith(stem) and cache_basename != f:
+                                        _, cand_ext = os.path.splitext(cache_basename)
+                                        if cand_ext and cache_basename == stem + cand_ext:
+                                            repair_ext = cand_ext
+                                            break
 
                             try:
                                 size = os.path.getsize(plexcached_path)
@@ -679,7 +682,7 @@ class MaintenanceService:
                                 ))
                             else:
                                 # Truly malformed — no sibling to infer extension from
-                                logging.warning(f"Malformed .plexcached file (no media extension): {f}")
+                                logging.warning(f"Malformed .plexcached file (no file extension): {f}")
                                 backups_to_cleanup.append(OrphanedBackup(
                                     plexcached_path=plexcached_path,
                                     original_filename=f,

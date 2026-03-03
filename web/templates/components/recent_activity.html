@@ -40,7 +40,15 @@
         <span class="text-muted">-</span>
         {% endif %}
     </td>
-    <td>{{ item.size }}</td>
+    <td>
+        {{ item.size }}
+        {% if item.associated_files %}
+        <span class="badge badge-muted badge-sm associated-files-badge"
+              title="{% for af in item.associated_files %}{{ af.filename }}{% if af.size %} ({{ af.size }}){% endif %}{% if not loop.last %}&#10;{% endif %}{% endfor %}">
+            +{{ item.associated_files|length }}
+        </span>
+        {% endif %}
+    </td>
 </tr>
 {% endfor %}
 {% endfor %}

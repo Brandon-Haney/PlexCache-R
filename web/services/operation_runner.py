@@ -74,6 +74,7 @@ class FileActivity:
     filename: str
     size_bytes: int = 0
     users: List[str] = field(default_factory=list)
+    associated_files: List[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         fmt = get_time_format()
@@ -92,7 +93,7 @@ class FileActivity:
         else:
             date_display = self.timestamp.strftime("%a, %b ") + str(self.timestamp.day)
 
-        return {
+        result = {
             "timestamp": self.timestamp.isoformat(),
             "time_display": time_display,
             "date_key": entry_date.isoformat(),
@@ -100,8 +101,11 @@ class FileActivity:
             "action": self.action,
             "filename": self.filename,
             "size": self._format_size(self.size_bytes),
-            "users": self.users
+            "users": self.users,
         }
+        if self.associated_files:
+            result["associated_files"] = self.associated_files
+        return result
 
     def _format_size(self, size_bytes: int) -> str:
         if size_bytes == 0:
@@ -135,7 +139,8 @@ def _load_activity_unlocked() -> List[FileActivity]:
                         action=item['action'],
                         filename=item['filename'],
                         size_bytes=item.get('size_bytes', 0),
-                        users=item.get('users', [])
+                        users=item.get('users', []),
+                        associated_files=item.get('associated_files', [])
                     ))
             except (KeyError, ValueError):
                 continue  # Skip malformed entries
@@ -161,13 +166,16 @@ def _save_activity_unlocked(activities: List[FileActivity]) -> None:
         data = []
         for activity in activities:
             if activity.timestamp > cutoff:
-                data.append({
+                entry = {
                     'timestamp': activity.timestamp.isoformat(),
                     'action': activity.action,
                     'filename': activity.filename,
                     'size_bytes': activity.size_bytes,
-                    'users': activity.users
-                })
+                    'users': activity.users,
+                }
+                if activity.associated_files:
+                    entry['associated_files'] = activity.associated_files
+                data.append(entry)
 
         save_json_atomically(str(ACTIVITY_FILE), data, label="activity")
 
@@ -759,6 +767,13 @@ class OperationRunner:
                 self._current_result.bytes_cached = self._current_result.bytes_cached_so_far
                 self._current_result.bytes_restored = self._current_result.bytes_restored_so_far
 
+            # Merge sibling activity entries into their parent video rows
+            if hasattr(app, 'sibling_map') and app.sibling_map:
+                try:
+                    self._merge_sibling_activities(app.sibling_map)
+                except Exception as e:
+                    logging.debug(f"Failed to merge sibling activities: {e}")
+
             # Check if we were stopped early
             if self._stop_requested:
                 self._add_log_message("Operation stopped by user")
@@ -817,6 +832,71 @@ class OperationRunner:
                 get_maintenance_runner()._try_dequeue()
             except Exception:
                 pass
+
+    def _merge_sibling_activities(self, sibling_map: Dict[str, list]) -> None:
+        """Merge sibling file activities into their parent video's associated_files.
+
+        After an operation completes, folds NFO/artwork/subtitle activity rows
+        into the parent video row as a compact "+N" badge.
+
+        Args:
+            sibling_map: Maps video real paths to lists of sibling file paths.
+        """
+        import os
+
+        # Build reverse map: sibling basename → parent video basename
+        # Skip ambiguous mappings (same sibling basename from multiple parents)
+        sibling_to_parent: Dict[str, str] = {}
+        ambiguous: set = set()
+        for video_path, siblings in sibling_map.items():
+            video_basename = os.path.basename(video_path)
+            for sib_path in siblings:
+                sib_basename = os.path.basename(sib_path)
+                if sib_basename in ambiguous:
+                    continue
+                if sib_basename in sibling_to_parent and sibling_to_parent[sib_basename] != video_basename:
+                    # Same sibling name mapped to different parents — ambiguous
+                    ambiguous.add(sib_basename)
+                    del sibling_to_parent[sib_basename]
+                else:
+                    sibling_to_parent[sib_basename] = video_basename
+
+        if not sibling_to_parent:
+            return
+
+        with _activity_file_lock:
+            activities = _load_activity_unlocked()
+            if not activities:
+                return
+
+            # Index parent video activities by (basename, action) for fast lookup
+            parent_index: Dict[tuple, int] = {}
+            for i, act in enumerate(activities):
+                key = (act.filename, act.action)
+                if key not in parent_index:
+                    parent_index[key] = i
+
+            merged_indices: set = set()
+            for i, act in enumerate(activities):
+                if act.filename in sibling_to_parent:
+                    parent_basename = sibling_to_parent[act.filename]
+                    parent_key = (parent_basename, act.action)
+                    if parent_key in parent_index:
+                        parent_idx = parent_index[parent_key]
+                        parent_act = activities[parent_idx]
+                        parent_act.associated_files.append({
+                            "filename": act.filename,
+                            "size": format_bytes(act.size_bytes) if act.size_bytes > 0 else "",
+                        })
+                        merged_indices.add(i)
+
+            if merged_indices:
+                activities = [a for i, a in enumerate(activities) if i not in merged_indices]
+                _save_activity_unlocked(activities)
+
+        # Update in-memory list
+        with self._lock:
+            self._recent_activity = activities
 
     def get_status_dict(self) -> dict:
         """Get status as a dictionary for API responses"""

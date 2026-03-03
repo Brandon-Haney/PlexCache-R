@@ -2842,6 +2842,7 @@ class SiblingFileFinder:
                 for entry in os.scandir(directory_path)
                 if entry.is_file()
                 and not entry.name.startswith('.')
+                and not entry.name.endswith('.plexcached')
                 and entry.name != file_basename
                 and not is_video_file(entry.name)
             ]

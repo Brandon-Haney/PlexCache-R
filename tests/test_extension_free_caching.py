@@ -159,6 +159,18 @@ class TestSiblingFileFinder:
         for s in result[video]:
             assert not os.path.basename(s).startswith(".")
 
+    def test_skips_plexcached_files(self, temp_dir):
+        """Sibling finder skips .plexcached backup files."""
+        video = create_test_file(os.path.join(temp_dir, "Movie.mkv"), "video")
+        create_test_file(os.path.join(temp_dir, "Movie.mkv.plexcached"), "backup")
+        create_test_file(os.path.join(temp_dir, "OtherMovie.mkv.plexcached"), "backup2")
+        create_test_file(os.path.join(temp_dir, "poster.jpg"), "img")
+        finder = SiblingFileFinder()
+        result = finder.get_media_siblings_grouped([video])
+        names = [os.path.basename(f) for f in result[video]]
+        assert "poster.jpg" in names
+        assert not any(n.endswith(".plexcached") for n in names)
+
     def test_backward_compat_alias(self):
         """SubtitleFinder is an alias for SiblingFileFinder."""
         assert SubtitleFinder is SiblingFileFinder

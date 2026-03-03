@@ -691,8 +691,8 @@ class TestSiblingActivityMerge:
         merged_names = {af["filename"] for af in result[0].associated_files}
         assert merged_names == {"Movie.nfo", "Movie.srt", "poster.jpg"}
 
-    def test_different_action_not_merged(self, tmp_path):
-        """Sibling with different action than parent stays separate."""
+    def test_incompatible_action_not_merged(self, tmp_path):
+        """Cached parent + Restored sibling stay separate (incompatible actions)."""
         f = tmp_path / "activity.json"
         now = datetime.now()
         activities = [
@@ -713,5 +713,36 @@ class TestSiblingActivityMerge:
              patch('web.services.operation_runner._get_activity_retention_hours', return_value=9999):
             result = load_activity()
 
-        # Both should remain (different actions)
+        # Both should remain (Cached vs Restored are incompatible)
         assert len(result) == 2
+
+    def test_restored_and_moved_are_compatible(self, tmp_path):
+        """Restored parent + Moved sibling merge (both are return-to-array)."""
+        f = tmp_path / "activity.json"
+        now = datetime.now()
+        activities = [
+            FileActivity(timestamp=now, action="Restored", filename="Movie.mkv", size_bytes=1_000_000),
+            FileActivity(timestamp=now, action="Moved", filename="Movie.nfo", size_bytes=9),
+            FileActivity(timestamp=now, action="Moved", filename="poster.jpg", size_bytes=200_000),
+        ]
+        runner = self._make_runner(activities, f)
+
+        sibling_map = {
+            "/mnt/user/Movies/Movie/Movie.mkv": [
+                "/mnt/user/Movies/Movie/Movie.nfo",
+                "/mnt/user/Movies/Movie/poster.jpg",
+            ],
+        }
+
+        with patch('web.services.operation_runner.ACTIVITY_FILE', f), \
+             patch('web.services.operation_runner._get_activity_retention_hours', return_value=9999):
+            runner._merge_sibling_activities(sibling_map)
+
+        with patch('web.services.operation_runner.ACTIVITY_FILE', f), \
+             patch('web.services.operation_runner._get_activity_retention_hours', return_value=9999):
+            result = load_activity()
+
+        assert len(result) == 1
+        assert result[0].filename == "Movie.mkv"
+        assert result[0].action == "Restored"
+        assert len(result[0].associated_files) == 2

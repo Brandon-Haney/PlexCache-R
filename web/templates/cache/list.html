@@ -148,6 +148,12 @@
                                 <span style="font-size: 0.75rem; opacity: 0.6;">{{ file.subtitle_count }}</span>
                             </span>
                             {% endif %}
+                            {% if file.sidecar_count > 0 %}
+                            <span class="sidecar-indicator" title="{{ file.sidecar_count }} sidecar file{{ 's' if file.sidecar_count > 1 else '' }} (artwork, metadata, etc.)">
+                                <i data-lucide="paperclip" style="width: 14px; height: 14px; vertical-align: middle; margin-left: 0.25rem; opacity: 0.6;"></i>
+                                <span style="font-size: 0.75rem; opacity: 0.6;">{{ file.sidecar_count }}</span>
+                            </span>
+                            {% endif %}
                         </td>
                         <td class="text-muted">{{ file.size_display }}</td>
                         {% if eviction_enabled %}

@@ -226,6 +226,12 @@ footer {
     z-index: 1;
 }
 
+/* Associated files badge (grouped sidecars) */
+.associated-files-badge {
+    margin-left: 0.375rem;
+    cursor: help;
+}
+
 /* Date group headers in activity feed */
 .date-group-header td {
     padding: 0.55rem 0.75rem 0.35rem;

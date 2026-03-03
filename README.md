@@ -1,5 +1,5 @@
-# PlexCache-D V3.0: Automate Plex Media Management
-### Updated 13/2/26
+# PlexCache-D V3.1: Automate Plex Media Management
+### Updated 3/3/26
 
 # Notice - Update to new Dockerised version. For instructions and discussion - https://github.com/StudioNirin/PlexCache-D/discussions/81 
 
@@ -36,6 +36,12 @@ The original PlexCache app only worked for local users for most features, due to
 - (New v3) - **Min Free Space** — Safety floor setting to prevent caching when cache drive space is low.
 - (New v3) - **Docker Support** — Official container with Unraid template, auto-setup, and path translation.
 - (New v3) - **Byte-Level Progress** — Smooth progress bar updates every 10MB during file copies, with ETA from copy rate.
+- (New v3.1) - **Plex OAuth Authentication** — Optional login with Plex identity verification (server owner), popup-based OAuth flow, session cookies, rate limiting, CSRF protection, and security headers.
+- (New v3.1) - **Password Fallback** — Optional local password authentication alongside Plex OAuth.
+- (New v3.1) - **Duplicate File Detection** — Surface duplicate warnings on Dashboard and Maintenance pages.
+- (New v3.1) - **Persistent Auth Sessions** — Login sessions survive container restarts.
+- (New v3.1) - **Vendored Frontend Libraries** — Lucide icons and HTMX served locally, no external CDN dependencies.
+- (New v3.1) - **Security Hardening** — CSP, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy headers.
 - Move watched media present on the cache drive back to the array.
 - Move respective subtitles along with the media moved to or from the cache.
 - Filter media older than a specified number of days.
@@ -87,7 +93,7 @@ PlexCache-D/
 └── plexcache_cached_files.txt  # Tracked cache files (Unraid mover exclude list)
 ```
 
-## Web UI (New in V3.0)
+## Web UI (V3.0+)
 
 PlexCache-D now includes a browser-based dashboard for monitoring and configuration.
 
@@ -99,7 +105,7 @@ python3 plexcache.py --web --port 8080     # Custom port
 ```
 
 **Features:**
-- **Setup Wizard** - Guided first-run configuration with Plex OAuth support
+- **Setup Wizard** - Guided first-run configuration with Plex OAuth and security setup
 - **Dashboard** - Real-time cache stats, Plex connection status, recent activity feed
 - **Cached Files** - Sortable file browser with filters, eviction controls
 - **Storage** - Drive analytics, breakdowns by source, largest/oldest files
@@ -111,6 +117,7 @@ python3 plexcache.py --web --port 8080     # Custom port
 - **Operations** — Run Now with real-time progress banner, ETA, and stop button
 - **Activity Feed** — Recent file operations with persistent history
 - **Maintenance History** — Persistent log of past maintenance actions
+- **Authentication** — Optional Plex OAuth login with password fallback and session management
 
 **Tech Stack:** FastAPI, HTMX, Jinja2, Plex-inspired dark theme
 
@@ -159,6 +166,7 @@ Open `http://[YOUR_IP]:5757` - the Setup Wizard will guide you through:
 - Library selection with cacheable options
 - User selection for OnDeck/Watchlist monitoring
 - Caching behavior configuration
+- Security settings (optional Plex OAuth authentication)
 
 **Important:** Volume paths for `/mnt/cache`, `/mnt/user0`, and `/mnt/user` must match exactly between container and host for Plex path resolution.
 
@@ -183,7 +191,7 @@ See the [Docker Installation](#docker-installation-recommended-for-unraid) secti
 
 ### Option 2: Manual Install + Web UI
 
-This runs PlexCache-D as a persistent web server with dashboard, scheduler, and all V3.0 features.
+This runs PlexCache-D as a persistent web server with dashboard, scheduler, and all features.
 
 **Prerequisites:**
 - Python 3.9+

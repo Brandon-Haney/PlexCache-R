@@ -864,6 +864,14 @@ class OperationRunner:
         if not sibling_to_parent:
             return
 
+        # "Restored" (rename) and "Moved" (copy) are both "return to array" —
+        # sidecars often use "Moved" while the video uses "Restored"
+        _COMPATIBLE_ACTIONS = {
+            "Restored": ("Restored", "Moved"),
+            "Moved": ("Restored", "Moved"),
+            "Cached": ("Cached",),
+        }
+
         with _activity_file_lock:
             activities = _load_activity_unlocked()
             if not activities:
@@ -880,15 +888,19 @@ class OperationRunner:
             for i, act in enumerate(activities):
                 if act.filename in sibling_to_parent:
                     parent_basename = sibling_to_parent[act.filename]
-                    parent_key = (parent_basename, act.action)
-                    if parent_key in parent_index:
-                        parent_idx = parent_index[parent_key]
-                        parent_act = activities[parent_idx]
-                        parent_act.associated_files.append({
-                            "filename": act.filename,
-                            "size": format_bytes(act.size_bytes) if act.size_bytes > 0 else "",
-                        })
-                        merged_indices.add(i)
+                    # Try compatible actions (e.g. Moved sibling → Restored parent)
+                    compatible = _COMPATIBLE_ACTIONS.get(act.action, (act.action,))
+                    for try_action in compatible:
+                        parent_key = (parent_basename, try_action)
+                        if parent_key in parent_index:
+                            parent_idx = parent_index[parent_key]
+                            parent_act = activities[parent_idx]
+                            parent_act.associated_files.append({
+                                "filename": act.filename,
+                                "size": format_bytes(act.size_bytes) if act.size_bytes > 0 else "",
+                            })
+                            merged_indices.add(i)
+                            break
 
             if merged_indices:
                 activities = [a for i, a in enumerate(activities) if i not in merged_indices]

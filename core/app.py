@@ -1547,6 +1547,47 @@ class PlexCacheApp:
             if len(files_to_move) > 6:
                 logging.info(f"  ...and {len(files_to_move) - 6} more")
 
+    def _build_restore_sibling_map(self) -> None:
+        """Populate sibling_map with restore-direction associations.
+
+        Uses the timestamp tracker's associated_files data to map videos
+        being restored to their sidecar files, so the web UI can group them.
+        """
+        array_set = set(self.media_to_array)
+        for array_path in list(self.media_to_array):
+            # Convert to cache path for timestamp tracker lookup
+            cache_path = None
+            if self.file_mover and self.file_mover.path_modifier:
+                cache_path, _ = self.file_mover.path_modifier.convert_real_to_cache(array_path)
+            elif self.config_manager.paths.real_source and self.config_manager.paths.cache_dir:
+                cache_path = array_path.replace(
+                    self.config_manager.paths.real_source,
+                    self.config_manager.paths.cache_dir, 1
+                )
+            if not cache_path:
+                continue
+
+            associated = self.timestamp_tracker.get_associated_files(cache_path)
+            if not associated:
+                continue
+
+            # Convert associated cache paths back to real/array paths
+            real_siblings = []
+            for assoc_cache in associated:
+                assoc_real = None
+                if self.file_mover and self.file_mover.path_modifier:
+                    assoc_real, _ = self.file_mover.path_modifier.convert_cache_to_real(assoc_cache)
+                elif self.config_manager.paths.real_source and self.config_manager.paths.cache_dir:
+                    assoc_real = assoc_cache.replace(
+                        self.config_manager.paths.cache_dir,
+                        self.config_manager.paths.real_source, 1
+                    )
+                if assoc_real and assoc_real in array_set:
+                    real_siblings.append(assoc_real)
+
+            if real_siblings:
+                self.sibling_map[array_path] = real_siblings
+
     def _move_files(self) -> None:
         """Move files to their destinations."""
         logging.info("")
@@ -1554,6 +1595,11 @@ class PlexCacheApp:
 
         # Step 1: Move watched files to array (frees space naturally)
         if self.config_manager.cache.watched_move and self.media_to_array:
+            # Build restore sibling map from timestamp tracker associations
+            # so the web UI can group sidecars under their parent video
+            if self.timestamp_tracker:
+                self._build_restore_sibling_map()
+
             # Log restore vs move summary before processing
             files_to_restore, files_to_move = self._separate_restore_and_move(self.media_to_array)
             if files_to_restore or files_to_move:

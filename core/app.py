@@ -159,6 +159,11 @@ class PlexCacheApp:
             if self.config_manager.cache.hardlinked_files == "move":
                 logging.info("[CONFIG] Hard-linked files mode: MOVE - Hard-linked files will be cached (seed copies preserved via remaining hard links)")
 
+            # Log associated files mode
+            assoc_mode = self.config_manager.cache.cache_associated_files
+            assoc_labels = {"all": "ALL (subtitles, artwork, NFOs, metadata)", "subtitles": "SUBTITLES ONLY", "none": "NONE (video files only)"}
+            logging.info(f"[CONFIG] Associated files mode: {assoc_labels.get(assoc_mode, assoc_mode)}")
+
             # Clean up stale exclude list entries (self-healing)
             # Skip in dry-run mode to avoid modifying tracking files
             if not self.dry_run:
@@ -1031,8 +1036,14 @@ class PlexCacheApp:
             return
 
         # Fetch sibling files for OnDeck media (already using real paths)
-        logging.debug("Finding sibling files for OnDeck media...")
-        ondeck_sibling_map = self.sibling_finder.get_media_siblings_grouped(list(self.ondeck_items), files_to_skip=set(self.files_to_skip))
+        assoc_mode = self.config_manager.cache.cache_associated_files
+        logging.debug(f"Finding sibling files for OnDeck media (mode: {assoc_mode})...")
+        if assoc_mode == "all":
+            ondeck_sibling_map = self.sibling_finder.get_media_siblings_grouped(list(self.ondeck_items), files_to_skip=set(self.files_to_skip))
+        elif assoc_mode == "subtitles":
+            ondeck_sibling_map = self.sibling_finder.get_media_subtitles_grouped(list(self.ondeck_items), files_to_skip=set(self.files_to_skip))
+        else:
+            ondeck_sibling_map = {}
         self.sibling_map.update(ondeck_sibling_map)
         sibling_count = sum(len(siblings) for siblings in ondeck_sibling_map.values())
         # Add all siblings to the modified paths set
@@ -1225,7 +1236,13 @@ class PlexCacheApp:
                 }
 
             result_set.update(modified_items)
-            watchlist_sibling_map = self.sibling_finder.get_media_siblings_grouped(modified_items, files_to_skip=set(self.files_to_skip))
+            wl_assoc_mode = self.config_manager.cache.cache_associated_files
+            if wl_assoc_mode == "all":
+                watchlist_sibling_map = self.sibling_finder.get_media_siblings_grouped(modified_items, files_to_skip=set(self.files_to_skip))
+            elif wl_assoc_mode == "subtitles":
+                watchlist_sibling_map = self.sibling_finder.get_media_subtitles_grouped(modified_items, files_to_skip=set(self.files_to_skip))
+            else:
+                watchlist_sibling_map = {}
             self.sibling_map.update(watchlist_sibling_map)
             for siblings in watchlist_sibling_map.values():
                 result_set.update(siblings)

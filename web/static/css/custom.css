@@ -226,6 +226,16 @@ footer {
     z-index: 1;
 }
 
+/* Activity table column tweaks */
+.activity-file-col {
+    word-break: break-word;
+    white-space: normal;
+    min-width: 0;
+}
+.recent-activity-scroll table td:first-child {
+    white-space: nowrap;
+}
+
 /* Associated files badge + expandable sub-rows */
 .af-parent {
     cursor: pointer;
@@ -254,7 +264,6 @@ footer {
     background: transparent !important;
 }
 .associated-sub-file {
-    max-width: 400px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -270,6 +279,47 @@ footer {
 .associated-sub-size {
     font-size: 0.8rem;
     color: var(--plex-text-muted, #8e8e93);
+}
+
+/* Associated files hover popup (compact tables) */
+.associated-files-hover {
+    position: relative;
+    display: inline-block;
+}
+.associated-files-popup {
+    display: none;
+    position: fixed;
+    background: var(--plex-surface-elevated, #1f1f1f);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--plex-radius-sm, 8px);
+    padding: 0.5rem 0.75rem;
+    min-width: 280px;
+    z-index: 1000;
+    box-shadow: var(--plex-shadow-elevated, 0 4px 12px rgba(0, 0, 0, 0.4));
+    white-space: nowrap;
+    pointer-events: none;
+}
+.associated-files-popup .af-popup-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.125rem 0;
+    font-size: 0.78rem;
+    color: var(--plex-text-muted, #8e8e93);
+}
+.associated-files-popup .af-popup-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+.associated-files-popup .af-popup-name .associated-sub-arrow {
+    opacity: 0.4;
+}
+.associated-files-popup .af-popup-size {
+    flex-shrink: 0;
+    text-align: right;
 }
 
 /* Date group headers in activity feed */
@@ -870,6 +920,10 @@ footer {
 .di-action-tag--restored {
     background: rgba(255,149,0,0.12);
     color: #FF9500;
+}
+.di-action-tag--error {
+    background: rgba(255,59,48,0.12);
+    color: #FF3B30;
 }
 .di-file-row__name {
     overflow: hidden;

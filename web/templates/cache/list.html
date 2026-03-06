@@ -136,26 +136,18 @@
                    hx-include=".cache-filter">
                 {% if files %}
                     {% for file in files %}
-                    <tr>
+                    {% set assoc_count = file.subtitle_count + file.sidecar_count %}
+                    <tr{% if file.associated_files %} class="af-parent" onclick="this.classList.toggle('af-expanded'); var s=this.nextElementSibling; while(s && s.classList.contains('associated-sub-row')){s.classList.toggle('af-visible'); s=s.nextElementSibling;}"{% endif %}>
                         <td>
                             <input type="checkbox" class="file-checkbox" value="{{ file.path }}" onchange="updateBulkActions()">
                         </td>
-                        <td title="{{ file.path }}">
-                            {{ file.filename }}
-                            {% if file.subtitle_count > 0 %}
-                            <span class="subtitle-indicator" title="{{ file.subtitle_count }} subtitle{{ 's' if file.subtitle_count > 1 else '' }}">
-                                <i data-lucide="subtitles" style="width: 14px; height: 14px; vertical-align: middle; margin-left: 0.25rem; opacity: 0.6;"></i>
-                                <span style="font-size: 0.75rem; opacity: 0.6;">{{ file.subtitle_count }}</span>
-                            </span>
-                            {% endif %}
-                            {% if file.sidecar_count > 0 %}
-                            <span class="sidecar-indicator" title="{{ file.sidecar_count }} sidecar file{{ 's' if file.sidecar_count > 1 else '' }} (artwork, metadata, etc.)">
-                                <i data-lucide="paperclip" style="width: 14px; height: 14px; vertical-align: middle; margin-left: 0.25rem; opacity: 0.6;"></i>
-                                <span style="font-size: 0.75rem; opacity: 0.6;">{{ file.sidecar_count }}</span>
-                            </span>
+                        <td title="{{ file.path }}">{{ file.filename }}</td>
+                        <td class="text-muted">
+                            {{ file.size_display }}
+                            {% if assoc_count > 0 %}
+                            <span class="badge badge-muted badge-sm associated-files-badge" title="{{ file.subtitle_count }} subtitle{{ 's' if file.subtitle_count != 1 else '' }}, {{ file.sidecar_count }} asset{{ 's' if file.sidecar_count != 1 else '' }}">+{{ assoc_count }}</span>
                             {% endif %}
                         </td>
-                        <td class="text-muted">{{ file.size_display }}</td>
                         {% if eviction_enabled %}
                         <td>
                             <span class="priority-badge {{ 'high' if file.priority_score >= 70 else 'medium' if file.priority_score >= 40 else 'low' }}">
@@ -192,12 +184,22 @@
                         <td class="text-muted">{{ file.cache_age_hours|round(1) }}h</td>
                         <td>
                             <button class="btn btn-sm btn-secondary"
-                                    onclick="showEvictConfirm('{{ file.path|replace("'", "\\'") }}', '{{ file.filename|replace("'", "\\'") }}', '{{ file.size_display }}')"
+                                    onclick="event.stopPropagation(); showEvictConfirm('{{ file.path|replace("'", "\\'") }}', '{{ file.filename|replace("'", "\\'") }}', '{{ file.size_display }}')"
                                     title="Evict from cache">
                                 <i data-lucide="x"></i>
                             </button>
                         </td>
                     </tr>
+                    {% if file.associated_files %}
+                    {% for af in file.associated_files %}
+                    <tr class="associated-sub-row">
+                        <td></td>
+                        <td class="associated-sub-file" title="{{ af.filename }}"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</td>
+                        <td class="associated-sub-size">{{ af.size }}</td>
+                        <td colspan="{{ 4 if eviction_enabled else 3 }}"></td>
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
                     {% endfor %}
                 {% else %}
                     <tr>

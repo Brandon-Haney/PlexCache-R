@@ -2825,7 +2825,10 @@ footer .version {
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
-    max-width: 280px;
+    max-width: 320px;
+}
+.breakdown-line > span:first-child {
+    margin-right: 1rem;
 }
 
 .breakdown-line {

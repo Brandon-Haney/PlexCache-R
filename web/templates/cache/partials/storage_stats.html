@@ -43,7 +43,7 @@
     <div class="stat-card">
         <div class="stat-card-header">
             <i data-lucide="files"></i>
-            Cached Files
+            Cached Items
         </div>
         <div class="stat-value orange">{{ data.storage.file_count }}</div>
         <div class="stat-label">{{ data.storage.cached_size_display }} total</div>
@@ -249,7 +249,7 @@
                 </div>
                 <div class="breakdown-stats">
                     <div class="breakdown-value">{{ data.breakdown.ondeck.count }}</div>
-                    <div class="breakdown-label">files</div>
+                    <div class="breakdown-label">items</div>
                 </div>
                 <div class="breakdown-size">{{ data.breakdown.ondeck.size_display }}</div>
                 <div class="breakdown-bar">
@@ -264,7 +264,7 @@
                 </div>
                 <div class="breakdown-stats">
                     <div class="breakdown-value">{{ data.breakdown.watchlist.count }}</div>
-                    <div class="breakdown-label">files</div>
+                    <div class="breakdown-label">items</div>
                 </div>
                 <div class="breakdown-size">{{ data.breakdown.watchlist.size_display }}</div>
                 <div class="breakdown-bar">
@@ -280,7 +280,7 @@
                 </div>
                 <div class="breakdown-stats">
                     <div class="breakdown-value">{{ data.breakdown.other.count }}</div>
-                    <div class="breakdown-label">files</div>
+                    <div class="breakdown-label">items</div>
                 </div>
                 <div class="breakdown-size">{{ data.breakdown.other.size_display }}</div>
                 <div class="breakdown-bar">
@@ -299,7 +299,7 @@
     <div class="card">
         <div class="card-header">
             <i data-lucide="arrow-up-wide-narrow"></i>
-            <h2>Largest Files</h2>
+            <h2>Largest Items</h2>
         </div>
         <div class="card-body card-body-scrollable" style="padding: 0;">
             <table class="compact-table">
@@ -317,7 +317,25 @@
                         {% for file in data.largest_files %}
                         <tr>
                             <td title="{{ file.path }}">{{ file.filename|truncate(35) }}</td>
-                            <td class="text-muted">{{ file.size_display }}</td>
+                            <td class="text-muted">
+                                {{ file.size_display }}
+                                {% set assoc_count = file.subtitle_count + file.sidecar_count %}
+                                {% if assoc_count > 0 %}
+                                <span class="associated-files-hover">
+                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
+                                    {% if file.associated_files %}
+                                    <span class="associated-files-popup">
+                                        {% for af in file.associated_files %}
+                                        <span class="af-popup-row">
+                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
+                                            <span class="af-popup-size">{{ af.size }}</span>
+                                        </span>
+                                        {% endfor %}
+                                    </span>
+                                    {% endif %}
+                                </span>
+                                {% endif %}
+                            </td>
                             {% if data.config.eviction_enabled %}
                             <td>
                                 <span class="priority-badge {{ 'high' if file.priority_score >= 70 else 'medium' if file.priority_score >= 40 else 'low' }}">
@@ -349,7 +367,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="5" class="text-muted text-center">No files in cache</td>
+                            <td colspan="5" class="text-muted text-center">No items in cache</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -361,7 +379,7 @@
     <div class="card">
         <div class="card-header">
             <i data-lucide="clock"></i>
-            <h2>Oldest Cached Files</h2>
+            <h2>Oldest Cached Items</h2>
         </div>
         <div class="card-body card-body-scrollable" style="padding: 0;">
             <table class="compact-table">
@@ -380,7 +398,25 @@
                         {% for file in data.oldest_files %}
                         <tr>
                             <td title="{{ file.path }}">{{ file.filename|truncate(30) }}</td>
-                            <td class="text-muted">{{ file.size_display }}</td>
+                            <td class="text-muted">
+                                {{ file.size_display }}
+                                {% set assoc_count = file.subtitle_count + file.sidecar_count %}
+                                {% if assoc_count > 0 %}
+                                <span class="associated-files-hover">
+                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
+                                    {% if file.associated_files %}
+                                    <span class="associated-files-popup">
+                                        {% for af in file.associated_files %}
+                                        <span class="af-popup-row">
+                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
+                                            <span class="af-popup-size">{{ af.size }}</span>
+                                        </span>
+                                        {% endfor %}
+                                    </span>
+                                    {% endif %}
+                                </span>
+                                {% endif %}
+                            </td>
                             {% if data.config.eviction_enabled %}
                             <td>
                                 <span class="priority-badge {{ 'high' if file.priority_score >= 70 else 'medium' if file.priority_score >= 40 else 'low' }}">
@@ -419,7 +455,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="6" class="text-muted text-center">No files in cache</td>
+                            <td colspan="6" class="text-muted text-center">No items in cache</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -453,7 +489,25 @@
                         {% for file in data.activity.recently_cached %}
                         <tr>
                             <td title="{{ file.path }}">{{ file.filename|truncate(30) }}</td>
-                            <td class="text-muted">{{ file.size_display }}</td>
+                            <td class="text-muted">
+                                {{ file.size_display }}
+                                {% set assoc_count = file.subtitle_count + file.sidecar_count %}
+                                {% if assoc_count > 0 %}
+                                <span class="associated-files-hover">
+                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
+                                    {% if file.associated_files %}
+                                    <span class="associated-files-popup">
+                                        {% for af in file.associated_files %}
+                                        <span class="af-popup-row">
+                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
+                                            <span class="af-popup-size">{{ af.size }}</span>
+                                        </span>
+                                        {% endfor %}
+                                    </span>
+                                    {% endif %}
+                                </span>
+                                {% endif %}
+                            </td>
                             {% if data.config.eviction_enabled %}
                             <td>
                                 <span class="priority-badge {{ 'high' if file.priority_score >= 70 else 'medium' if file.priority_score >= 40 else 'low' }}">
@@ -486,7 +540,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="6" class="text-muted text-center">No recently cached files</td>
+                            <td colspan="6" class="text-muted text-center">No recently cached items</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -529,7 +583,25 @@
                         {% for item in data.expiring_soon %}
                         <tr>
                             <td title="{{ item.file.path }}">{{ item.file.filename|truncate(30) }}</td>
-                            <td class="text-muted">{{ item.file.size_display }}</td>
+                            <td class="text-muted">
+                                {{ item.file.size_display }}
+                                {% set assoc_count = item.file.subtitle_count + item.file.sidecar_count %}
+                                {% if assoc_count > 0 %}
+                                <span class="associated-files-hover">
+                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
+                                    {% if item.file.associated_files %}
+                                    <span class="associated-files-popup">
+                                        {% for af in item.file.associated_files %}
+                                        <span class="af-popup-row">
+                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
+                                            <span class="af-popup-size">{{ af.size }}</span>
+                                        </span>
+                                        {% endfor %}
+                                    </span>
+                                    {% endif %}
+                                </span>
+                                {% endif %}
+                            </td>
                             {% if data.config.eviction_enabled %}
                             <td>
                                 <span class="priority-badge {{ 'high' if item.file.priority_score >= 70 else 'medium' if item.file.priority_score >= 40 else 'low' }}">
@@ -568,7 +640,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="6" class="text-muted text-center">No files expiring within {{ data.expiring_within_days }} days</td>
+                            <td colspan="6" class="text-muted text-center">No items expiring within {{ data.expiring_within_days }} days</td>
                         </tr>
                     {% endif %}
                 </tbody>
@@ -576,4 +648,24 @@
         </div>
     </div>
 </div>
-<script>lucide.createIcons();</script>
+<script>
+lucide.createIcons();
+(function() {
+    document.querySelectorAll('.associated-files-hover').forEach(function(el) {
+        var popup = el.querySelector('.associated-files-popup');
+        if (!popup) return;
+        el.addEventListener('mouseenter', function() {
+            var rect = el.getBoundingClientRect();
+            var vw = window.innerWidth;
+            var availRight = vw - rect.left - 24;
+            popup.style.maxWidth = Math.max(280, availRight) + 'px';
+            popup.style.top = (rect.bottom + 6) + 'px';
+            popup.style.left = rect.left + 'px';
+            popup.style.display = 'block';
+        });
+        el.addEventListener('mouseleave', function() {
+            popup.style.display = 'none';
+        });
+    });
+})();
+</script>

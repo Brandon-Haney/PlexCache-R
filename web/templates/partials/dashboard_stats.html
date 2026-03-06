@@ -5,7 +5,10 @@
         Cache Drive
     </div>
     <div class="stat-value orange">{{ stats.cache_files }}</div>
-    <div class="stat-label">files cached{% if stats.cached_files_size %} ({{ stats.cached_files_size }}){% endif %}</div>
+    <div class="stat-label">items cached{% if stats.cached_files_size %} ({{ stats.cached_files_size }}){% endif %}</div>
+    {% if stats.associated_files_count %}
+    <div class="stat-detail">+{{ stats.associated_files_count }} associated</div>
+    {% endif %}
     <div class="progress-container">
         <div class="progress-bar">
             <div class="progress-fill {% if stats.eviction_over_threshold %}progress-warning{% endif %}" style="width: {{ stats.usage_percent }}%"></div>

@@ -162,7 +162,9 @@ def cache_files_table(
             "users": f.users,
             "is_ondeck": f.is_ondeck,
             "is_watchlist": f.is_watchlist,
-            "subtitle_count": f.subtitle_count
+            "subtitle_count": f.subtitle_count,
+            "sidecar_count": f.sidecar_count,
+            "associated_files": f.associated_files
         }
         for f in files
     ]

@@ -103,6 +103,7 @@ class AuditResults:
 
     # Issues
     unprotected_files: List[UnprotectedFile] = field(default_factory=list)
+    grouped_unprotected: List[dict] = field(default_factory=list)  # Grouped by directory
     orphaned_plexcached: List[OrphanedBackup] = field(default_factory=list)
     extensionless_files: List[ExtensionlessFile] = field(default_factory=list)
     stale_exclude_entries: List[str] = field(default_factory=list)
@@ -463,6 +464,56 @@ class MaintenanceService:
                 return array_file.replace(array_dir, cache_dirs[i], 1)
         return None
 
+    def _group_unprotected_by_directory(self, files: List[UnprotectedFile]) -> List[dict]:
+        """Group unprotected files by directory, with video as primary and sidecars as children."""
+        from collections import OrderedDict
+        groups: OrderedDict[str, List[UnprotectedFile]] = OrderedDict()
+        for f in files:
+            directory = os.path.dirname(f.cache_path)
+            groups.setdefault(directory, []).append(f)
+
+        result = []
+        for directory, dir_files in groups.items():
+            # Find the video file (if any) to use as primary
+            video = None
+            children = []
+            for f in dir_files:
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext in VIDEO_EXTENSIONS:
+                    if video is None:
+                        video = f
+                    else:
+                        children.append(f)
+                else:
+                    children.append(f)
+
+            if video and children:
+                # Video with sidecars — group them
+                total_size = video.size + sum(c.size for c in children)
+                result.append({
+                    "primary": video,
+                    "children": children,
+                    "total_size_display": format_bytes(total_size),
+                    "folder": os.path.basename(directory),
+                })
+            elif not video and len(children) > 1:
+                # Multiple sidecars without a video — group under folder name
+                primary = children[0]
+                rest = children[1:]
+                total_size = sum(c.size for c in dir_files)
+                result.append({
+                    "primary": primary,
+                    "children": rest,
+                    "total_size_display": format_bytes(total_size),
+                    "folder": os.path.basename(directory),
+                })
+            else:
+                # Single file or single video — no grouping needed
+                for f in dir_files:
+                    result.append({"primary": f, "children": [], "total_size_display": f.size_display, "folder": None})
+
+        return result
+
     def _check_plexcached_backup(self, cache_file: str) -> tuple:
         """Check if a .plexcached backup exists on array for a cache file"""
         array_file = self._cache_to_array_path(cache_file)
@@ -558,6 +609,9 @@ class MaintenanceService:
 
         # Sort unprotected files by filename (default)
         results.unprotected_files.sort(key=lambda f: f.filename.lower())
+
+        # Group by directory: video file as primary, sidecars as children
+        results.grouped_unprotected = self._group_unprotected_by_directory(results.unprotected_files)
 
         # Find orphaned .plexcached files and extensionless duplicates
         results.orphaned_plexcached, results.extensionless_files = self._get_orphaned_plexcached()

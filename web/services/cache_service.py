@@ -34,6 +34,7 @@ class CachedFile:
     subtitle_paths: Optional[List[str]] = None  # Paths to associated subtitles
     sidecar_count: int = 0  # Number of non-subtitle associated files (artwork, NFO, etc.)
     sidecar_paths: Optional[List[str]] = None  # Paths to sidecar files
+    associated_files: Optional[List[Dict[str, str]]] = None  # [{filename, size}] for template rendering
 
 
 class CacheService:
@@ -505,6 +506,11 @@ class CacheService:
 
         now = datetime.now()
 
+        # Include associated files stored inside parent timestamp entries
+        for ts_info in timestamps.values():
+            if isinstance(ts_info, dict) and "associated_files" in ts_info:
+                cached_paths.extend(ts_info["associated_files"])
+
         # First pass: classify files into three categories
         subtitle_paths = []
         video_paths = []
@@ -646,6 +652,21 @@ class CacheService:
             subs = video_subtitles.get(cache_path, [])
             sidecars = video_sidecars.get(cache_path, [])
 
+            # Build associated files list for template rendering
+            assoc_list = None
+            all_assoc = subs + sidecars
+            if all_assoc:
+                assoc_list = []
+                for ap in all_assoc:
+                    try:
+                        asize = os.path.getsize(ap) if os.path.exists(ap) else 0
+                    except OSError:
+                        asize = 0
+                    assoc_list.append({
+                        "filename": os.path.basename(ap),
+                        "size": format_bytes(asize)
+                    })
+
             files.append(CachedFile(
                 path=cache_path,
                 filename=filename,
@@ -662,7 +683,8 @@ class CacheService:
                 subtitle_count=len(subs),
                 subtitle_paths=subs if subs else None,
                 sidecar_count=len(sidecars),
-                sidecar_paths=sidecars if sidecars else None
+                sidecar_paths=sidecars if sidecars else None,
+                associated_files=assoc_list
             ))
 
         # Sort by specified column
@@ -831,7 +853,8 @@ class CacheService:
             "eviction_over_by_display": eviction_over_by_display,
             "cache_limit_exceeded": cache_limit_exceeded,
             "min_free_space_warning": min_free_space_warning,
-            "plexcache_quota_exceeded": plexcache_quota_exceeded
+            "plexcache_quota_exceeded": plexcache_quota_exceeded,
+            "associated_files_count": sum(f.subtitle_count + f.sidecar_count for f in all_files)
         }
 
     def get_drive_details(self, expiring_within_days: int = 3) -> Dict[str, Any]:
@@ -1257,6 +1280,9 @@ class CacheService:
                 "users": f.users,
                 "is_ondeck": f.is_ondeck,
                 "is_watchlist": f.is_watchlist,
+                "subtitle_count": f.subtitle_count,
+                "sidecar_count": f.sidecar_count,
+                "associated_files": f.associated_files,
                 "priority_breakdown": breakdown
             })
 

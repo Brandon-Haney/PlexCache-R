@@ -894,9 +894,15 @@ function dismissMaintCompletionBanner() {
         ] },
         {% endfor %}
     ];
+    var errorMessages = [
+        {% for msg in status.error_messages|default([]) %}
+        '{{ msg|truncate(80, True, "...")|e }}',
+        {% endfor %}
+    ];
     var detailHtml = '';
     var hintHtml = '';
-    if (recentFiles.length > 0) {
+    var hasDetails = recentFiles.length > 0 || errorMessages.length > 0;
+    if (hasDetails) {
         hintHtml = '<div class="di-expand-hint"><span>Click for details</span><i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i></div>';
         detailHtml = '<div class="di-pill__detail"><div class="di-divider"></div>';
         recentFiles.forEach(function(f) {
@@ -919,6 +925,18 @@ function dismissMaintCompletionBanner() {
         var totalFiles = filesCached + filesRestored;
         if (totalFiles > recentFiles.length) {
             detailHtml += '<div class="di-more-files">+ ' + (totalFiles - recentFiles.length) + ' more files</div>';
+        }
+        if (errorMessages.length > 0) {
+            if (recentFiles.length > 0) detailHtml += '<div class="di-divider"></div>';
+            errorMessages.forEach(function(msg) {
+                detailHtml += '<div class="di-file-row">' +
+                    '<span class="di-action-tag di-action-tag--error">ERROR</span>' +
+                    '<span class="di-file-row__name" style="color: var(--plex-error, #e5a00d);">' + msg + '</span>' +
+                    '</div>';
+            });
+            if (errorCount > errorMessages.length) {
+                detailHtml += '<div class="di-more-files">+ ' + (errorCount - errorMessages.length) + ' more errors</div>';
+            }
         }
         detailHtml += '</div>';
     }

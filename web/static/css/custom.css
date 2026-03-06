@@ -871,6 +871,10 @@ footer {
     background: rgba(255,149,0,0.12);
     color: #FF9500;
 }
+.di-action-tag--error {
+    background: rgba(255,59,48,0.12);
+    color: #FF3B30;
+}
 .di-file-row__name {
     overflow: hidden;
     text-overflow: ellipsis;

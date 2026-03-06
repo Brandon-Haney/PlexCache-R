@@ -153,7 +153,7 @@ async def lifespan(app: FastAPI):
 # Maintenance bulk actions (untracked files, orphaned backups) can submit >1000 paths.
 import starlette.requests
 _original_form = starlette.requests.Request.form
-def _form_with_higher_limit(self, *, max_files=1000, max_fields=10000, max_part_size=1024*1024):
+def _form_with_higher_limit(self, *, max_files=1000, max_fields=10000, max_part_size=20*1024*1024):
     return _original_form(self, max_files=max_files, max_fields=max_fields, max_part_size=max_part_size)
 starlette.requests.Request.form = _form_with_higher_limit
 

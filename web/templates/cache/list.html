@@ -146,7 +146,7 @@
                             {{ file.size_display }}
                             {% if assoc_count > 0 %}
                             <span class="associated-files-hover">
-                                <span class="badge badge-muted badge-sm associated-files-badge" title="{{ file.subtitle_count }} subtitle{{ 's' if file.subtitle_count != 1 else '' }}, {{ file.sidecar_count }} asset{{ 's' if file.sidecar_count != 1 else '' }}">+{{ assoc_count }}</span>
+                                <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
                                 {% if file.associated_files %}
                                 <span class="associated-files-popup">
                                     {% for af in file.associated_files %}

@@ -11,7 +11,7 @@
             {{ file.size_display }}
             {% if assoc_count > 0 %}
             <span class="associated-files-hover">
-                <span class="badge badge-muted badge-sm associated-files-badge" title="{{ file.subtitle_count }} subtitle{{ 's' if file.subtitle_count != 1 else '' }}, {{ file.sidecar_count }} asset{{ 's' if file.sidecar_count != 1 else '' }}">+{{ assoc_count }}</span>
+                <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
                 {% if file.associated_files %}
                 <span class="associated-files-popup">
                     {% for af in file.associated_files %}
@@ -112,24 +112,4 @@
     </tr>
     {% endif %}
 </tfoot>
-<script>
-lucide.createIcons();
-(function() {
-    document.querySelectorAll('#cache-table-body .associated-files-hover').forEach(function(el) {
-        var popup = el.querySelector('.associated-files-popup');
-        if (!popup) return;
-        el.addEventListener('mouseenter', function() {
-            var rect = el.getBoundingClientRect();
-            var vw = window.innerWidth;
-            var availRight = vw - rect.left - 24;
-            popup.style.maxWidth = Math.max(280, availRight) + 'px';
-            popup.style.top = (rect.bottom + 6) + 'px';
-            popup.style.left = rect.left + 'px';
-            popup.style.display = 'block';
-        });
-        el.addEventListener('mouseleave', function() {
-            popup.style.display = 'none';
-        });
-    });
-})();
-</script>
+<script>lucide.createIcons();</script>

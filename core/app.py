@@ -1120,9 +1120,12 @@ class PlexCacheApp:
 
         # Check for files that should be moved back to array (no longer needed in cache)
         # Only check if watched_move is enabled - otherwise files stay on cache indefinitely
-        # Skip if watchlist data is incomplete (plex.tv unreachable) to prevent accidental moves
+        # Skip if OnDeck or watchlist data is incomplete to prevent accidental moves
         if self.config_manager.cache.watched_move:
-            if not self.plex_manager.is_watchlist_data_complete():
+            if not self.plex_manager.is_ondeck_data_complete():
+                logging.warning("Skipping array restore - OnDeck data incomplete (Plex server unreachable)")
+                logging.warning("Files will remain on cache until next successful run")
+            elif not self.plex_manager.is_watchlist_data_complete():
                 logging.warning("Skipping array restore - watchlist data incomplete (plex.tv unreachable)")
                 logging.warning("Files will remain on cache until next successful run")
             else:

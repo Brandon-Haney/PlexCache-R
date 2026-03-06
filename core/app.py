@@ -214,6 +214,11 @@ class PlexCacheApp:
             # Log summary and cleanup
             self._finish()
             
+        except ConnectionError as e:
+            # Plex server unreachable — log clean message, no traceback
+            logging.error(f"{e}")
+            logging.warning("No files were moved. Will retry on next scheduled run.")
+            raise
         except Exception as e:
             if self.logging_manager:
                 logging.critical(f"Application error: {type(e).__name__}: {e}", exc_info=True)

@@ -1,3 +1,4 @@
+{% from "macros/associated_files.html" import af_popup, af_popup_init %}
 <!-- ZFS Warning (only shown when ZFS detected without manual override) -->
 {% if data.storage.is_zfs and not data.storage.has_manual_drive_size %}
 <div class="alert alert-warning mb-2" style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 1rem;">
@@ -319,22 +320,7 @@
                             <td title="{{ file.path }}">{{ file.filename|truncate(35) }}</td>
                             <td class="text-muted">
                                 {{ file.size_display }}
-                                {% set assoc_count = file.subtitle_count + file.sidecar_count %}
-                                {% if assoc_count > 0 %}
-                                <span class="associated-files-hover">
-                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
-                                    {% if file.associated_files %}
-                                    <span class="associated-files-popup">
-                                        {% for af in file.associated_files %}
-                                        <span class="af-popup-row">
-                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
-                                            <span class="af-popup-size">{{ af.size }}</span>
-                                        </span>
-                                        {% endfor %}
-                                    </span>
-                                    {% endif %}
-                                </span>
-                                {% endif %}
+                                {{ af_popup(file.associated_files or [], file.subtitle_count + file.sidecar_count) }}
                             </td>
                             {% if data.config.eviction_enabled %}
                             <td>
@@ -400,22 +386,7 @@
                             <td title="{{ file.path }}">{{ file.filename|truncate(30) }}</td>
                             <td class="text-muted">
                                 {{ file.size_display }}
-                                {% set assoc_count = file.subtitle_count + file.sidecar_count %}
-                                {% if assoc_count > 0 %}
-                                <span class="associated-files-hover">
-                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
-                                    {% if file.associated_files %}
-                                    <span class="associated-files-popup">
-                                        {% for af in file.associated_files %}
-                                        <span class="af-popup-row">
-                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
-                                            <span class="af-popup-size">{{ af.size }}</span>
-                                        </span>
-                                        {% endfor %}
-                                    </span>
-                                    {% endif %}
-                                </span>
-                                {% endif %}
+                                {{ af_popup(file.associated_files or [], file.subtitle_count + file.sidecar_count) }}
                             </td>
                             {% if data.config.eviction_enabled %}
                             <td>
@@ -491,22 +462,7 @@
                             <td title="{{ file.path }}">{{ file.filename|truncate(30) }}</td>
                             <td class="text-muted">
                                 {{ file.size_display }}
-                                {% set assoc_count = file.subtitle_count + file.sidecar_count %}
-                                {% if assoc_count > 0 %}
-                                <span class="associated-files-hover">
-                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
-                                    {% if file.associated_files %}
-                                    <span class="associated-files-popup">
-                                        {% for af in file.associated_files %}
-                                        <span class="af-popup-row">
-                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
-                                            <span class="af-popup-size">{{ af.size }}</span>
-                                        </span>
-                                        {% endfor %}
-                                    </span>
-                                    {% endif %}
-                                </span>
-                                {% endif %}
+                                {{ af_popup(file.associated_files or [], file.subtitle_count + file.sidecar_count) }}
                             </td>
                             {% if data.config.eviction_enabled %}
                             <td>
@@ -585,22 +541,7 @@
                             <td title="{{ item.file.path }}">{{ item.file.filename|truncate(30) }}</td>
                             <td class="text-muted">
                                 {{ item.file.size_display }}
-                                {% set assoc_count = item.file.subtitle_count + item.file.sidecar_count %}
-                                {% if assoc_count > 0 %}
-                                <span class="associated-files-hover">
-                                    <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
-                                    {% if item.file.associated_files %}
-                                    <span class="associated-files-popup">
-                                        {% for af in item.file.associated_files %}
-                                        <span class="af-popup-row">
-                                            <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
-                                            <span class="af-popup-size">{{ af.size }}</span>
-                                        </span>
-                                        {% endfor %}
-                                    </span>
-                                    {% endif %}
-                                </span>
-                                {% endif %}
+                                {{ af_popup(item.file.associated_files or [], item.file.subtitle_count + item.file.sidecar_count) }}
                             </td>
                             {% if data.config.eviction_enabled %}
                             <td>
@@ -648,24 +589,5 @@
         </div>
     </div>
 </div>
-<script>
-lucide.createIcons();
-(function() {
-    document.querySelectorAll('.associated-files-hover').forEach(function(el) {
-        var popup = el.querySelector('.associated-files-popup');
-        if (!popup) return;
-        el.addEventListener('mouseenter', function() {
-            var rect = el.getBoundingClientRect();
-            var vw = window.innerWidth;
-            var availRight = vw - rect.left - 24;
-            popup.style.maxWidth = Math.max(280, availRight) + 'px';
-            popup.style.top = (rect.bottom + 6) + 'px';
-            popup.style.left = rect.left + 'px';
-            popup.style.display = 'block';
-        });
-        el.addEventListener('mouseleave', function() {
-            popup.style.display = 'none';
-        });
-    });
-})();
-</script>
+<script>lucide.createIcons();</script>
+{{ af_popup_init('storage-content') }}

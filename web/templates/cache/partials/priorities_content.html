@@ -1,3 +1,4 @@
+{% from "macros/associated_files.html" import af_badge %}
 <!-- Priority Report Content - loaded via HTMX -->
 
 {% if data.files %}
@@ -172,9 +173,7 @@
                     <td class="text-muted">
                         {{ file.size_display }}
                         {% set assoc_count = (file.subtitle_count or 0) + (file.sidecar_count or 0) %}
-                        {% if assoc_count > 0 %}
-                        <span class="badge badge-muted badge-sm associated-files-badge" title="{{ file.subtitle_count or 0 }} subtitle{{ 's' if (file.subtitle_count or 0) != 1 else '' }}, {{ file.sidecar_count or 0 }} asset{{ 's' if (file.sidecar_count or 0) != 1 else '' }}">+{{ assoc_count }}</span>
-                        {% endif %}
+                        {{ af_badge(assoc_count, (file.subtitle_count or 0) ~ ' subtitle' ~ ('s' if (file.subtitle_count or 0) != 1 else '') ~ ', ' ~ (file.sidecar_count or 0) ~ ' asset' ~ ('s' if (file.sidecar_count or 0) != 1 else '')) }}
                     </td>
                     <td class="source-badges">
                         {% if file.is_ondeck %}

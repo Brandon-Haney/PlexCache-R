@@ -1,4 +1,5 @@
 <!-- Cache files table body - HTMX partial -->
+{% from "macros/associated_files.html" import af_popup, af_popup_init %}
 {% if files %}
     {% for file in files %}
     {% set assoc_count = file.subtitle_count + file.sidecar_count %}
@@ -9,21 +10,7 @@
         <td title="{{ file.path }}">{{ file.filename }}</td>
         <td class="text-muted">
             {{ file.size_display }}
-            {% if assoc_count > 0 %}
-            <span class="associated-files-hover">
-                <span class="badge badge-muted badge-sm associated-files-badge">+{{ assoc_count }}</span>
-                {% if file.associated_files %}
-                <span class="associated-files-popup">
-                    {% for af in file.associated_files %}
-                    <span class="af-popup-row">
-                        <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
-                        <span class="af-popup-size">{{ af.size }}</span>
-                    </span>
-                    {% endfor %}
-                </span>
-                {% endif %}
-            </span>
-            {% endif %}
+            {{ af_popup(file.associated_files or [], assoc_count) }}
         </td>
         {% if eviction_enabled %}
         <td>
@@ -112,32 +99,5 @@
     </tr>
     {% endif %}
 </tfoot>
-<script>
-lucide.createIcons();
-(function() {
-    var body = document.getElementById('cache-table-body');
-    if (!body) return;
-    body.addEventListener('mouseenter', function(e) {
-        var hover = e.target.closest('.associated-files-hover');
-        if (!hover) return;
-        var popup = hover.querySelector('.associated-files-popup');
-        if (!popup) return;
-        var rect = hover.getBoundingClientRect();
-        var vw = window.innerWidth;
-        popup.style.top = (rect.bottom + 4) + 'px';
-        popup.style.display = 'block';
-        // Measure popup width then position to stay in viewport
-        var pw = popup.offsetWidth;
-        var left = rect.left;
-        if (left + pw > vw - 16) left = vw - pw - 16;
-        if (left < 8) left = 8;
-        popup.style.left = left + 'px';
-    }, true);
-    body.addEventListener('mouseleave', function(e) {
-        var hover = e.target.closest('.associated-files-hover');
-        if (!hover) return;
-        var popup = hover.querySelector('.associated-files-popup');
-        if (popup) popup.style.display = 'none';
-    }, true);
-})();
-</script>
+<script>lucide.createIcons();</script>
+{{ af_popup_init('cache-table-body') }}

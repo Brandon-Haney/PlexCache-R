@@ -3219,10 +3219,13 @@ class FileFilter:
 
         # Check for upgrade scenario: old .plexcached with different filename but same media identity
         # In this case, we still want to move the file so _move_to_array can handle the upgrade
-        # NOTE: Only treat as upgrade if the .plexcached has a DIFFERENT name than expected
+        # NOTE: Only for video files — sidecar files (poster.jpg, fanart.jpg) are not upgrades of each other
         expected_plexcached = array_file + PLEXCACHED_EXTENSION
-        cache_identity = get_media_identity(cache_file_name)
-        old_plexcached = find_matching_plexcached(array_path, cache_identity, cache_file_name)
+        if is_video_file(cache_file_name):
+            cache_identity = get_media_identity(cache_file_name)
+            old_plexcached = find_matching_plexcached(array_path, cache_identity, cache_file_name)
+        else:
+            old_plexcached = None
         if old_plexcached and old_plexcached != expected_plexcached:
             # Found a .plexcached with different filename - this is a true upgrade scenario
             # Let _move_to_array handle it
@@ -4651,8 +4654,9 @@ class FileMover:
             old_cache_file_to_remove = None
 
             # Step 0: Check for upgrade scenario - clean up old .plexcached if needed
-            # Only relevant when backups are enabled
-            if self.create_plexcached_backups and not os.path.isfile(plexcached_file):
+            # Only relevant when backups are enabled and only for video files
+            # (sidecar files like poster.jpg/fanart.jpg are not "upgrades" of each other)
+            if self.create_plexcached_backups and not os.path.isfile(plexcached_file) and is_video_file(cache_file_name):
                 cache_identity = get_media_identity(cache_file_name)
                 old_plexcached = find_matching_plexcached(array_path, cache_identity, array_file)
                 if old_plexcached and old_plexcached != plexcached_file:
@@ -5102,7 +5106,8 @@ class FileMover:
                     logging.debug(f"Restored array file: {plexcached_file} -> {array_file}")
 
             # Scenario 2: Check for filename-change upgrade (different .plexcached with same media identity)
-            elif os.path.isfile(cache_file):
+            # Only for video files — sidecar files are not upgrades of each other
+            elif os.path.isfile(cache_file) and is_video_file(cache_file):
                 cache_identity = get_media_identity(cache_file)
                 old_plexcached = find_matching_plexcached(array_path, cache_identity, cache_file)
 

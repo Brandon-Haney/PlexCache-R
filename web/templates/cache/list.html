@@ -71,10 +71,20 @@
 <!-- Cache Table -->
 <div class="card">
     <div class="card-body" style="padding: 0;">
-        <table>
+        <table style="table-layout: fixed; width: 100%;">
+            <colgroup>
+                <col style="width: 40px;">
+                <col><!-- FILE: takes remaining space -->
+                <col style="width: 90px;"><!-- SIZE -->
+                {% if eviction_enabled %}<col style="width: 80px;"><!-- PRIORITY -->{% endif %}
+                <col style="width: 100px;"><!-- SOURCE -->
+                <col style="width: 100px;"><!-- USERS -->
+                <col style="width: 60px;"><!-- AGE -->
+                <col style="width: 60px;"><!-- ACTIONS -->
+            </colgroup>
             <thead>
                 <tr>
-                    <th style="width: 40px;">
+                    <th>
                         <input type="checkbox" id="select-all" onclick="toggleSelectAll(this)" title="Select all">
                     </th>
                     <th class="sortable" data-sort="filename" onclick="sortTable('filename')">
@@ -137,15 +147,27 @@
                 {% if files %}
                     {% for file in files %}
                     {% set assoc_count = file.subtitle_count + file.sidecar_count %}
-                    <tr{% if file.associated_files %} class="af-parent" onclick="this.classList.toggle('af-expanded'); var s=this.nextElementSibling; while(s && s.classList.contains('associated-sub-row')){s.classList.toggle('af-visible'); s=s.nextElementSibling;}"{% endif %}>
+                    <tr>
                         <td>
                             <input type="checkbox" class="file-checkbox" value="{{ file.path }}" onchange="updateBulkActions()">
                         </td>
-                        <td title="{{ file.path }}">{{ file.filename }}</td>
+                        <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ file.path }}">{{ file.filename }}</td>
                         <td class="text-muted">
                             {{ file.size_display }}
                             {% if assoc_count > 0 %}
-                            <span class="badge badge-muted badge-sm associated-files-badge" title="{{ file.subtitle_count }} subtitle{{ 's' if file.subtitle_count != 1 else '' }}, {{ file.sidecar_count }} asset{{ 's' if file.sidecar_count != 1 else '' }}">+{{ assoc_count }}</span>
+                            <span class="associated-files-hover">
+                                <span class="badge badge-muted badge-sm associated-files-badge" title="{{ file.subtitle_count }} subtitle{{ 's' if file.subtitle_count != 1 else '' }}, {{ file.sidecar_count }} asset{{ 's' if file.sidecar_count != 1 else '' }}">+{{ assoc_count }}</span>
+                                {% if file.associated_files %}
+                                <span class="associated-files-popup">
+                                    {% for af in file.associated_files %}
+                                    <span class="af-popup-row">
+                                        <span class="af-popup-name"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</span>
+                                        <span class="af-popup-size">{{ af.size }}</span>
+                                    </span>
+                                    {% endfor %}
+                                </span>
+                                {% endif %}
+                            </span>
                             {% endif %}
                         </td>
                         {% if eviction_enabled %}
@@ -184,22 +206,12 @@
                         <td class="text-muted">{{ file.cache_age_hours|round(1) }}h</td>
                         <td>
                             <button class="btn btn-sm btn-secondary"
-                                    onclick="event.stopPropagation(); showEvictConfirm('{{ file.path|replace("'", "\\'") }}', '{{ file.filename|replace("'", "\\'") }}', '{{ file.size_display }}')"
+                                    onclick="showEvictConfirm('{{ file.path|replace("'", "\\'") }}', '{{ file.filename|replace("'", "\\'") }}', '{{ file.size_display }}')"
                                     title="Evict from cache">
                                 <i data-lucide="x"></i>
                             </button>
                         </td>
                     </tr>
-                    {% if file.associated_files %}
-                    {% for af in file.associated_files %}
-                    <tr class="associated-sub-row">
-                        <td></td>
-                        <td class="associated-sub-file" title="{{ af.filename }}"><span class="associated-sub-arrow">&#8627;</span> {{ af.filename }}</td>
-                        <td class="associated-sub-size">{{ af.size }}</td>
-                        <td colspan="{{ 4 if eviction_enabled else 3 }}"></td>
-                    </tr>
-                    {% endfor %}
-                    {% endif %}
                     {% endfor %}
                 {% else %}
                     <tr>

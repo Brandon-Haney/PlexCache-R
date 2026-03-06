@@ -111,8 +111,8 @@
             </thead>
             <tbody>
                 {% for item in scan_results.items %}
-                <tr class="dup-item-row" data-rating-key="{{ item.rating_key }}" onclick="toggleDuplicateExpand(this)" style="cursor: pointer;">
-                    <td onclick="event.stopPropagation();">
+                <tr class="dup-item-row" data-rating-key="{{ item.rating_key }}" onclick="toggleDuplicateExpand(this, event)" style="cursor: pointer;">
+                    <td>
                         <!-- Only show checkbox if item has orphan files -->
                     </td>
                     <td>

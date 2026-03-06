@@ -609,7 +609,8 @@ function showDuplicateSection() {
     }
 }
 
-function toggleDuplicateExpand(row) {
+function toggleDuplicateExpand(row, event) {
+    if (event && (event.target.tagName === 'INPUT' || event.target.closest('input'))) return;
     const key = row.dataset.ratingKey;
     const detailRow = document.querySelector(`.dup-detail-row[data-parent="${key}"]`);
     const icon = row.querySelector('.dup-expand-icon');

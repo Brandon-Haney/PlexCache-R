@@ -148,8 +148,8 @@
                     {% set file = group.primary %}
                     {% set children = group.children %}
                     {% set group_size = file.size + children|sum(attribute='size') if children else file.size %}
-                    <tr data-filename="{{ file.filename|lower }}" data-size="{{ group_size }}" data-age="{{ file.age_days }}" data-has-backup="{{ file.has_plexcached_backup|lower }}" data-has-dup="{{ file.has_array_duplicate|lower }}"{% if children %} class="untracked-group-row" onclick="toggleUntrackedGroup(this)" style="cursor: pointer;"{% endif %}>
-                        <td onclick="event.stopPropagation();">
+                    <tr data-filename="{{ file.filename|lower }}" data-size="{{ group_size }}" data-age="{{ file.age_days }}" data-has-backup="{{ file.has_plexcached_backup|lower }}" data-has-dup="{{ file.has_array_duplicate|lower }}"{% if children %} class="untracked-group-row" onclick="toggleUntrackedGroup(this, event)" style="cursor: pointer;"{% endif %}>
+                        <td>
                             <input type="checkbox" class="untracked-checkbox" value="{{ file.cache_path }}" onchange="toggleUntrackedFile(this){% if children %}; toggleGroupCheckbox(this){% endif %}" data-has-backup="{{ file.has_plexcached_backup|lower }}" data-has-dup="{{ file.has_array_duplicate|lower }}">
                         </td>
                         <td title="{{ file.cache_path }}" style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -182,7 +182,7 @@
                     </tr>
                     {% for child in children %}
                     <tr class="untracked-child-row" style="display: none;" data-filename="{{ child.filename|lower }}" data-size="{{ child.size }}" data-age="{{ child.age_days }}">
-                        <td onclick="event.stopPropagation();">
+                        <td>
                             <input type="checkbox" class="untracked-checkbox untracked-child-cb" value="{{ child.cache_path }}" onchange="toggleUntrackedFile(this)" data-has-backup="{{ child.has_plexcached_backup|lower }}" data-has-dup="{{ child.has_array_duplicate|lower }}">
                         </td>
                         <td title="{{ child.cache_path }}" style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 2rem;">
@@ -663,7 +663,8 @@ var sortState = sortState || {
     orphaned: { column: 'filename', direction: 'asc' }
 };
 
-function toggleUntrackedGroup(row) {
+function toggleUntrackedGroup(row, event) {
+    if (event && (event.target.tagName === 'INPUT' || event.target.closest('input'))) return;
     var expanded = row.classList.toggle('untracked-group-expanded');
     var next = row.nextElementSibling;
     while (next && next.classList.contains('untracked-child-row')) {

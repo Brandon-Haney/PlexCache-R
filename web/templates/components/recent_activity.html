@@ -27,7 +27,7 @@
         <span class="badge badge-muted">{{ item.action }}</span>
         {% endif %}
     </td>
-    <td class="text-muted" style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ item.filename }}">{{ item.filename }}</td>
+    <td class="text-muted activity-file-col" title="{{ item.filename }}">{{ item.filename }}</td>
     <td class="user-badges">
         {% if item.users and item.users|length > 0 %}
             {% for user in item.users[:3] %}

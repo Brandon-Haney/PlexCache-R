@@ -597,8 +597,8 @@ var LogViewer = (function() {
             reapplySearchHighlights();
         }
 
-        // Auto-scroll
-        if (els.autoScroll.checked) {
+        // Auto-scroll only when live streaming (not when viewing completed logs)
+        if (els.autoScroll.checked && els.liveUpdates.checked) {
             els.logContent.scrollTop = els.logContent.scrollHeight;
         }
 
@@ -662,7 +662,7 @@ var LogViewer = (function() {
                 evt.detail.target.scrollTop = savedScrollPosition;
                 reapplySearchHighlights();
                 savedScrollPosition = null;
-            } else if (els.autoScroll.checked) {
+            } else if (els.autoScroll.checked && els.liveUpdates.checked) {
                 evt.detail.target.scrollTop = evt.detail.target.scrollHeight;
             }
         }

@@ -6,7 +6,7 @@
         <td>
             <input type="checkbox" class="file-checkbox" value="{{ file.path }}" onchange="updateBulkActions()">
         </td>
-        <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ file.path }}">{{ file.filename }}</td>
+        <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0;" title="{{ file.path }}">{{ file.filename }}</td>
         <td class="text-muted">
             {{ file.size_display }}
             {% if assoc_count > 0 %}

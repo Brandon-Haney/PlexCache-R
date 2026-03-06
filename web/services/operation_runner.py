@@ -221,6 +221,7 @@ class OperationResult:
     bytes_restored_so_far: int = 0
     last_completed_file: str = ""
     error_count: int = 0
+    error_messages: List[str] = field(default_factory=list)
     # Byte-level batch progress (from FileMover callback)
     batch_bytes_copied: int = 0
     batch_bytes_total: int = 0
@@ -477,11 +478,15 @@ class OperationRunner:
                 clean_msg = msg.split(sep, 1)[-1]
                 break
 
-        # Count errors
+        # Count errors and capture messages
         if ' - ERROR - ' in msg or ' - CRITICAL - ' in msg:
             with self._lock:
                 if self._current_result:
                     self._current_result.error_count += 1
+                    # Extract just the message portion after ERROR/CRITICAL
+                    error_text = clean_msg.strip() if clean_msg else msg.strip()
+                    if len(self._current_result.error_messages) < 10:
+                        self._current_result.error_messages.append(error_text)
 
         # Detect phase transitions
         for marker, phase_key, phase_display in self._PHASE_MARKERS:
@@ -1067,6 +1072,7 @@ class OperationRunner:
             status["bytes_cached_display"] = self._format_bytes(result.bytes_cached) if result.bytes_cached > 0 else ""
             status["bytes_restored_display"] = self._format_bytes(result.bytes_restored) if result.bytes_restored > 0 else ""
             status["error_count"] = result.error_count
+            status["error_messages"] = result.error_messages[:5]
             status["was_stopped"] = self._stop_requested
 
             # Files processed in this run for hover detail

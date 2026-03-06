@@ -154,11 +154,13 @@
                         </td>
                         <td title="{{ file.cache_path }}" style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                             {{ file.filename }}
+                        </td>
+                        <td class="text-muted" style="white-space: nowrap;">
+                            {% if children %}{{ group.total_size_display }}{% else %}{{ file.size_display }}{% endif %}
                             {% if children %}
-                            <span class="badge badge-muted" style="margin-left: 4px; font-size: 0.7rem;">+{{ children|length }} file{{ 's' if children|length != 1 }}</span>
+                            <span class="badge badge-muted badge-sm associated-files-badge">+{{ children|length }}</span>
                             {% endif %}
                         </td>
-                        <td class="text-muted">{% if children %}{{ group.total_size_display }}{% else %}{{ file.size_display }}{% endif %}</td>
                         <td class="text-muted">
                             {% if file.has_invalid_timestamp %}
                             <span class="badge badge-warning">Bad date</span>

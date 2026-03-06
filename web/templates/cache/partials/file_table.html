@@ -112,4 +112,32 @@
     </tr>
     {% endif %}
 </tfoot>
-<script>lucide.createIcons();</script>
+<script>
+lucide.createIcons();
+(function() {
+    var body = document.getElementById('cache-table-body');
+    if (!body) return;
+    body.addEventListener('mouseenter', function(e) {
+        var hover = e.target.closest('.associated-files-hover');
+        if (!hover) return;
+        var popup = hover.querySelector('.associated-files-popup');
+        if (!popup) return;
+        var rect = hover.getBoundingClientRect();
+        var vw = window.innerWidth;
+        popup.style.top = (rect.bottom + 4) + 'px';
+        popup.style.display = 'block';
+        // Measure popup width then position to stay in viewport
+        var pw = popup.offsetWidth;
+        var left = rect.left;
+        if (left + pw > vw - 16) left = vw - pw - 16;
+        if (left < 8) left = 8;
+        popup.style.left = left + 'px';
+    }, true);
+    body.addEventListener('mouseleave', function(e) {
+        var hover = e.target.closest('.associated-files-hover');
+        if (!hover) return;
+        var popup = hover.querySelector('.associated-files-popup');
+        if (popup) popup.style.display = 'none';
+    }, true);
+})();
+</script>

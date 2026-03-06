@@ -113,6 +113,12 @@ document.addEventListener('click', function(e) {
     }
 });
 
+// Encode paths as a single JSON field to avoid Starlette's max_fields limit.
+// The backend reads paths_json first, falls back to individual paths fields.
+function appendPathsToForm(formData, paths) {
+    formData.append('paths_json', JSON.stringify(Array.from(paths)));
+}
+
 // Selected items tracking
 let selectedUntrackedFiles = new Set();
 let selectedOrphanedBackups = new Set();
@@ -403,7 +409,7 @@ function restoreOrphanedSelected(isDryRun = false) {
 
     const count = orphanedPaths.length;
     const formData = new FormData();
-    orphanedPaths.forEach(path => formData.append('paths', path));
+    appendPathsToForm(formData, orphanedPaths);
 
     const action = isDryRun ? 'Preview' : 'Restore';
     const message = `
@@ -440,7 +446,7 @@ function deleteOrphanedSelected(isDryRun = false) {
 
     const count = selectedOrphanedBackups.size;
     const formData = new FormData();
-    selectedOrphanedBackups.forEach(path => formData.append('paths', path));
+    appendPathsToForm(formData, selectedOrphanedBackups);
 
     const action = isDryRun ? 'Preview' : 'Delete';
     const message = `
@@ -690,7 +696,7 @@ function deleteSelectedDuplicates(isDryRun) {
 
     const count = selectedDuplicateFiles.size;
     const formData = new FormData();
-    selectedDuplicateFiles.forEach(function(path) { formData.append('paths', path); });
+    appendPathsToForm(formData, selectedDuplicateFiles);
 
     const fileList = Array.from(selectedDuplicateFiles).slice(0, 5).map(function(path) {
         return '<li style="font-size: 0.9em; color: var(--text-muted);">' + path.split('/').pop() + '</li>';

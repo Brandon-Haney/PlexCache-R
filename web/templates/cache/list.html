@@ -398,7 +398,7 @@ function executeEvict() {
 
     // Always use maintenance runner endpoint (handles single + bulk)
     const formData = new FormData();
-    pendingEvictPaths.forEach(path => formData.append('paths', path));
+    formData.append('paths_json', JSON.stringify(pendingEvictPaths));
 
     fetch('/maintenance/evict-files', {
         method: 'POST',

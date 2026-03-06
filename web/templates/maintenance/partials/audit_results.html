@@ -773,7 +773,7 @@ function keepOnCacheSelected() {
 
     const count = selectedUntrackedFiles.size;
     const formData = new FormData();
-    selectedUntrackedFiles.forEach(path => formData.append('paths', path));
+    appendPathsToForm(formData, selectedUntrackedFiles);
 
     // Build file list for display
     const fileList = Array.from(selectedUntrackedFiles).slice(0, 5).map(path =>
@@ -830,7 +830,7 @@ function moveToArraySelected() {
     });
 
     const formData = new FormData();
-    selectedUntrackedFiles.forEach(path => formData.append('paths', path));
+    appendPathsToForm(formData, selectedUntrackedFiles);
 
     // Build file list for display
     const fileList = Array.from(selectedUntrackedFiles).slice(0, 5).map(path =>

@@ -5111,7 +5111,7 @@ class FileMover:
                 cache_identity = get_media_identity(cache_file)
                 old_plexcached = find_matching_plexcached(array_path, cache_identity, cache_file)
 
-                # Scenario 2: Upgraded file - old .plexcached exists with different name
+                # Scenario 2a: Upgraded file - old .plexcached exists with different name
                 if old_plexcached and old_plexcached != plexcached_file:
                     operation_type = "Moved"  # Copy operation (upgrade)
                     old_name = os.path.basename(old_plexcached).replace(PLEXCACHED_EXTENSION, '')
@@ -5149,22 +5149,16 @@ class FileMover:
                             os.remove(array_file)
                             return 1
 
-                # Scenario 3: No .plexcached at all - copy to array (preserving ownership)
-                # CRITICAL: Use /mnt/user0/ (array direct) to check if file truly exists on array
+                # Scenario 2b: No .plexcached, video not on array - copy to array
                 elif not os.path.isfile(get_array_direct_path(array_file)):
                     operation_type = "Moved"  # Copy operation (no backup)
                     logging.debug(f"No .plexcached found, copying from cache to array: {cache_file}")
                     cache_size = os.path.getsize(cache_file)
-                    # For Docker: translate cache path to host path for log display
                     display_src = self._translate_to_host_path(cache_file) if self.file_utils.is_docker else None
-                    # CRITICAL: Copy to /mnt/user0/ (array direct), NOT /mnt/user/ (FUSE)
-                    # If we copy to /mnt/user/, Unraid's cache policy may put the file
-                    # back on cache (if shareUseCache=yes), causing data loss
                     array_direct_file = get_array_direct_path(array_file)
                     array_direct_dir = os.path.dirname(array_direct_file)
                     os.makedirs(array_direct_dir, exist_ok=True)
 
-                    # Build stop check for cancellable copy
                     def combined_stop_check():
                         if self._stop_requested:
                             return True
@@ -5178,13 +5172,43 @@ class FileMover:
                     )
                     logging.debug(f"Copied to array: {array_direct_file}")
 
-                    # Verify copy succeeded by comparing file sizes
                     if os.path.isfile(array_direct_file):
                         array_size = os.path.getsize(array_direct_file)
                         if cache_size != array_size:
                             logging.error(f"Size mismatch after copy! Cache: {cache_size}, Array: {array_size}. Keeping cache file.")
                             os.remove(array_direct_file)
                             return 1
+
+            # Scenario 3: Non-video file (sidecar/asset) with no .plexcached - copy to array
+            elif os.path.isfile(cache_file) and not os.path.isfile(get_array_direct_path(array_file)):
+                operation_type = "Moved"
+                logging.debug(f"No .plexcached found for associated file, copying to array: {cache_file}")
+                cache_size = os.path.getsize(cache_file)
+                display_src = self._translate_to_host_path(cache_file) if self.file_utils.is_docker else None
+                # CRITICAL: Copy to /mnt/user0/ (array direct), NOT /mnt/user/ (FUSE)
+                array_direct_file = get_array_direct_path(array_file)
+                array_direct_dir = os.path.dirname(array_direct_file)
+                os.makedirs(array_direct_dir, exist_ok=True)
+
+                def combined_stop_check():
+                    if self._stop_requested:
+                        return True
+                    if self._stop_check and self._stop_check():
+                        return True
+                    return False
+
+                self.file_utils.copy_file_with_permissions(
+                    cache_file, array_direct_file, verbose=True, display_src=display_src,
+                    stop_check=combined_stop_check, progress_callback=byte_callback
+                )
+                logging.debug(f"Copied to array: {array_direct_file}")
+
+                if os.path.isfile(array_direct_file):
+                    array_size = os.path.getsize(array_direct_file)
+                    if cache_size != array_size:
+                        logging.error(f"Size mismatch after copy! Cache: {cache_size}, Array: {array_size}. Keeping cache file.")
+                        os.remove(array_direct_file)
+                        return 1
 
             # Delete cache copy only if array file truly exists on array
             # CRITICAL: Use /mnt/user0/ to avoid FUSE false positive where cache file appears as array file

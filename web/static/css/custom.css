@@ -301,10 +301,10 @@ footer {
     border-radius: var(--plex-radius-sm, 8px);
     padding: 0.5rem 0.75rem;
     min-width: 280px;
-    max-width: 500px;
+    max-width: calc(100vw - 240px);
     z-index: 1000;
     box-shadow: var(--plex-shadow-elevated, 0 4px 12px rgba(0, 0, 0, 0.4));
-    white-space: nowrap;
+    white-space: normal;
     pointer-events: none;
 }
 .associated-files-popup .af-popup-row {
@@ -316,9 +316,7 @@ footer {
     color: var(--plex-text-muted, #8e8e93);
 }
 .associated-files-popup .af-popup-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    word-break: break-all;
     flex: 1;
     min-width: 0;
 }

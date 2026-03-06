@@ -198,8 +198,14 @@ class PlexManager:
             self.plex = PlexServer(self.plex_url, self.plex_token)
             logging.debug(f"Plex server version: {self.plex.version}")
         except Exception as e:
-            _log_api_error("connect to Plex server", e)
-            raise ConnectionError(f"Error connecting to the Plex server: {e}")
+            # Extract the root cause from nested exception chains
+            root = e
+            while root.__cause__:
+                root = root.__cause__
+            reason = str(root)
+            # Log clean message (no traceback), raise with concise reason
+            logging.error(f"Cannot connect to Plex server at {self.plex_url}: {reason}")
+            raise ConnectionError(f"Cannot connect to Plex server: {reason}") from None
 
     def _rate_limited_api_call(self) -> None:
         """Enforce rate limiting for plex.tv API calls."""

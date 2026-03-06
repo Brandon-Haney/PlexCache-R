@@ -765,6 +765,9 @@ class OperationRunner:
             else:
                 self._add_log_message("Operation completed successfully")
 
+        except ConnectionError as e:
+            # Plex unreachable — already logged cleanly by app.run(), no traceback needed
+            self._add_log_message(f"ERROR: {e}")
         except Exception as e:
             error_message = str(e)
             self._add_log_message(f"ERROR: {error_message}")

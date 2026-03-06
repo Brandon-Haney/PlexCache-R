@@ -302,9 +302,10 @@ footer {
     padding: 0.5rem 0.75rem;
     min-width: 280px;
     max-width: calc(100vw - 240px);
+    width: max-content;
     z-index: 1000;
     box-shadow: var(--plex-shadow-elevated, 0 4px 12px rgba(0, 0, 0, 0.4));
-    white-space: normal;
+    white-space: nowrap;
     pointer-events: none;
 }
 .associated-files-popup .af-popup-row {
@@ -316,7 +317,6 @@ footer {
     color: var(--plex-text-muted, #8e8e93);
 }
 .associated-files-popup .af-popup-name {
-    word-break: break-all;
     flex: 1;
     min-width: 0;
 }

@@ -70,17 +70,17 @@
 
 <!-- Cache Table -->
 <div class="card">
-    <div class="card-body" style="padding: 0; overflow: hidden;">
+    <div class="card-body" style="padding: 0; overflow-x: auto;">
         <table style="table-layout: fixed; width: 100%;">
             <colgroup>
-                <col style="width: 40px;">
+                <col style="width: 3%;">
                 <col><!-- FILE: takes remaining space -->
-                <col style="width: 100px;"><!-- SIZE -->
-                {% if eviction_enabled %}<col style="width: 80px;"><!-- PRIORITY -->{% endif %}
-                <col style="width: 100px;"><!-- SOURCE -->
-                <col style="width: 110px;"><!-- USERS -->
-                <col style="width: 55px;"><!-- AGE -->
-                <col style="width: 50px;"><!-- ACTIONS -->
+                <col style="width: 8%;"><!-- SIZE -->
+                {% if eviction_enabled %}<col style="width: 7%;"><!-- PRIORITY -->{% endif %}
+                <col style="width: 8%;"><!-- SOURCE -->
+                <col style="width: 9%;"><!-- USERS -->
+                <col style="width: 5%;"><!-- AGE -->
+                <col style="width: 5%;"><!-- ACTIONS -->
             </colgroup>
             <thead>
                 <tr>

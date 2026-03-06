@@ -70,21 +70,11 @@
 
 <!-- Cache Table -->
 <div class="card">
-    <div class="card-body" style="padding: 0; overflow-x: auto;">
-        <table class="cache-files-table" style="table-layout: fixed; width: 100%;">
-            <colgroup>
-                <col style="width: 36px;">
-                <col><!-- FILE: takes remaining space -->
-                <col style="width: 90px;"><!-- SIZE -->
-                {% if eviction_enabled %}<col style="width: 72px;"><!-- PRIORITY -->{% endif %}
-                <col style="width: 90px;"><!-- SOURCE -->
-                <col style="width: 100px;"><!-- USERS -->
-                <col style="width: 52px;"><!-- AGE -->
-                <col style="width: 44px;"><!-- ACTIONS -->
-            </colgroup>
+    <div class="card-body" style="padding: 0;">
+        <table>
             <thead>
                 <tr>
-                    <th>
+                    <th style="width: 40px;">
                         <input type="checkbox" id="select-all" onclick="toggleSelectAll(this)" title="Select all">
                     </th>
                     <th class="sortable" data-sort="filename" onclick="sortTable('filename')">
@@ -151,7 +141,7 @@
                         <td>
                             <input type="checkbox" class="file-checkbox" value="{{ file.path }}" onchange="updateBulkActions()">
                         </td>
-                        <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0;" title="{{ file.path }}">{{ file.filename }}</td>
+                        <td title="{{ file.path }}">{{ file.filename }}</td>
                         <td class="text-muted">
                             {{ file.size_display }}
                             {% if assoc_count > 0 %}

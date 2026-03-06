@@ -226,16 +226,6 @@ footer {
     z-index: 1;
 }
 
-/* Cached Files table — tighter padding to fit all columns */
-.cache-files-table th,
-.cache-files-table td {
-    padding: 0.625rem 0.5rem;
-}
-.cache-files-table th:first-child,
-.cache-files-table td:first-child {
-    padding-left: 0.75rem;
-}
-
 /* Activity table column tweaks */
 .activity-file-col {
     word-break: break-word;

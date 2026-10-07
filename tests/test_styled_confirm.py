@@ -58,3 +58,18 @@ def test_every_hx_confirm_has_a_dialog_title():
                 line = source[:match.start()].count("\n") + 1
                 offenders.append(f"{path.relative_to(WEB)}:{line}")
     assert not offenders, "Add data-confirm-title to: " + ", ".join(offenders)
+
+
+def test_no_hx_on_attributes():
+    """hx-on handlers are compiled with Function(), which the CSP blocks (no
+    'unsafe-eval'), so they silently never run. Use a listener in app.js, e.g.
+    data-reset-on-success for clearing a form."""
+    main_src = (WEB / "main.py").read_text(encoding="utf-8")
+    assert "unsafe-eval" not in main_src
+    offenders = []
+    for path in (WEB / "templates").rglob("*.html"):
+        source = _strip_comments(path.read_text(encoding="utf-8"))
+        for match in re.finditer(r"\s(?:data-)?hx-on(?:[:\-=])", source):
+            line = source[:match.start()].count("\n") + 1
+            offenders.append(f"{path.relative_to(WEB)}:{line}")
+    assert not offenders, "hx-on is blocked by the CSP: " + ", ".join(offenders)

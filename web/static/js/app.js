@@ -246,3 +246,18 @@ try {
         });
     });
 })();
+
+// Forms marked data-reset-on-success clear after a successful request.
+// Handled here rather than with hx-on: htmx compiles hx-on handlers with
+// Function(), which the Content-Security-Policy (no 'unsafe-eval') blocks.
+// A response retargeted elsewhere (an error alert) leaves the input as typed.
+// data-reset-clear="#selector" empties another element too.
+document.addEventListener('htmx:afterRequest', function(e) {
+    var form = e.detail.elt;
+    if (!form || form.tagName !== 'FORM' || !form.hasAttribute('data-reset-on-success')) return;
+    if (!e.detail.successful || e.detail.xhr.getResponseHeader('HX-Retarget')) return;
+    form.reset();
+    var clear = form.getAttribute('data-reset-clear');
+    var target = clear && document.querySelector(clear);
+    if (target) target.innerHTML = '';
+});

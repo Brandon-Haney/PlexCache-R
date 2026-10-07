@@ -30,9 +30,15 @@ def _force_real_modules():
                  "web.services", "web.services.settings_service", "web"]:
         if isinstance(sys.modules.get(name), MagicMock):
             del sys.modules[name]
-    import web.config  # noqa: F401
-    import web.routers.settings  # noqa: F401
-    import web.routers.api  # noqa: F401
+    import importlib
+    import web.config
+    import web.routers.settings
+    import web.routers.api
+    # A router imported earlier, while web.config was a mock, keeps that mock
+    # as its `templates`; reload it against the real one.
+    for router in (web.routers.settings, web.routers.api):
+        if router.templates is not web.config.templates:
+            importlib.reload(router)
 
 
 _force_real_modules()

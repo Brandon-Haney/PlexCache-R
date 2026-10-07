@@ -828,11 +828,16 @@ body {
     border-radius: 6px;
     font-size: 0.8rem;
     font-weight: 500;
+    /* Badges with and without an icon sit side by side (status + OnDeck);
+       baseline alignment dropped the text-only one to the icon's bottom edge. */
+    vertical-align: middle;
 }
 
-.badge i {
+/* Lucide replaces <i data-lucide> with <svg>, so size the svg */
+.badge svg {
     width: 12px;
     height: 12px;
+    flex-shrink: 0;
 }
 
 .badge-success {

@@ -20,6 +20,7 @@
                                 hx-delete="/settings/paths/{{ index }}"
                                 hx-target="#path-mappings"
                                 hx-swap="innerHTML"
+                                data-confirm-title="Delete path mapping" data-confirm-label="Delete"
                                 hx-confirm="Delete path mapping '{{ mapping.name }}'?">
                             <i data-lucide="trash-2"></i>
                         </button>

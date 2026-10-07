@@ -41,11 +41,13 @@
         <div style="display: flex; gap: 0.5rem; margin-top: 0.6rem; flex-wrap: wrap;">
             <button type="button" class="btn btn-sm btn-secondary"
                     hx-post="/settings/security/api-key" hx-target="#api-access-section" hx-swap="outerHTML"
+                    data-confirm-title="Regenerate API key" data-confirm-label="Regenerate"
                     hx-confirm="Generate a new key? The current key stops working immediately, so update Tautulli / Home Assistant afterwards.">
                 <i data-lucide="refresh-cw"></i> Regenerate
             </button>
             <button type="button" class="btn btn-sm btn-danger"
                     hx-delete="/settings/security/api-key" hx-target="#api-access-section" hx-swap="outerHTML"
+                    data-confirm-title="Remove API key" data-confirm-label="Remove"
                     hx-confirm="Remove the API key? Automations using it will stop working while login is on.">
                 <i data-lucide="trash-2"></i> Remove
             </button>

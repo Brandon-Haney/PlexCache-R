@@ -349,7 +349,7 @@ def get_dashboard_stats(use_cache: bool = True) -> tuple:
             _, updated_at = web_cache.get_with_age(CACHE_KEY_DASHBOARD_STATS)
             cache_age = format_cache_age(updated_at)
             # Stale cache from older fieldset — recompute fresh
-            if "health_duplicate_count" not in cached_stats:
+            if "health_duplicate_count" not in cached_stats or "media_servers" not in cached_stats:
                 web_cache.invalidate(CACHE_KEY_DASHBOARD_STATS)
             else:
                 # Override non-cacheable live flag
@@ -360,6 +360,16 @@ def get_dashboard_stats(use_cache: bool = True) -> tuple:
     stats = _compute_dashboard_stats()
     web_cache.set(CACHE_KEY_DASHBOARD_STATS, stats)
     return stats, "just now"
+
+
+def invalidate_dashboard_stats() -> None:
+    """Drop the cached dashboard stats, so the next view recomputes them.
+
+    For changes the stats show at once, such as which media servers are set
+    up (setup, Settings > Media Servers): otherwise the status card can show
+    the old servers for up to DEFAULT_TTL_SECONDS.
+    """
+    get_web_cache_service().invalidate(CACHE_KEY_DASHBOARD_STATS)
 
 # Singleton instance
 _web_cache_service: Optional[WebCacheService] = None

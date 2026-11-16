@@ -4,7 +4,9 @@ The status card said "Plex Connected" / "Plex Not Connected" whatever the
 install used, so a Jellyfin-only install always showed Plex as down. Now
 SettingsService.media_server_status() lists the servers the run uses, Plex
 first, each with whether it answers, and the card shows a badge for each.
-GET /api/status keeps "plex" and adds "media_servers".
+GET /api/status keeps "plex" and adds "media_servers". The cached stats are
+dropped when setup finishes or a media server is saved, and cached stats from
+before the list existed are recomputed, so the card never shows old servers.
 """
 
 import json
@@ -117,3 +119,33 @@ def test_card_shows_a_badge_per_server():
 def test_card_without_the_list_keeps_the_plex_badge():
     assert _badges({"plex_connected": True}) == ["Plex Connected"]
     assert _badges({"media_servers": [], "plex_connected": False}) == ["Plex Not Connected"]
+
+
+def test_cached_stats_from_before_the_server_list_are_recomputed():
+    from web.services import web_cache
+    cache = MagicMock()
+    cache.get.return_value = {"health_duplicate_count": 0, "plex_connected": False}
+    cache.get_with_age.return_value = (None, None)
+    fresh = {"health_duplicate_count": 0, "media_servers": []}
+    with patch.object(web_cache, "get_web_cache_service", return_value=cache), \
+            patch.object(web_cache, "_compute_dashboard_stats", return_value=fresh):
+        assert web_cache.get_dashboard_stats() == (fresh, "just now")
+    cache.invalidate.assert_called_once_with(web_cache.CACHE_KEY_DASHBOARD_STATS)
+
+
+def test_saving_a_media_server_drops_the_cached_stats(service, tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from web.routers import settings as settings_router
+    svc = service(PLEX)
+    app = FastAPI()
+    app.include_router(settings_router.router, prefix="/settings")
+    with patch("web.routers.settings.get_settings_service", return_value=svc), \
+            patch("web.routers.settings.invalidate_dashboard_stats") as invalidate:
+        client = TestClient(app)
+        client.put("/settings/jellyfin", data={"jellyfin_enabled": "true", "jellyfin_url": "http://jf:8096",
+                                               "jellyfin_api_key": "key"})
+        assert invalidate.call_count == 1
+        client.put("/settings/plex", data={"plex_url": "http://plex:32400", "plex_token": "tok",
+                                           "plex_enabled": "true"})
+        assert invalidate.call_count == 2

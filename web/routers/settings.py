@@ -18,6 +18,7 @@ from starlette.datastructures import ImmutableMultiDict
 from web.config import templates, CONFIG_DIR, PLEXCACHE_PRODUCT_VERSION
 from web.dependencies import parse_form
 from web.services import get_settings_service, get_scheduler_service
+from web.services.web_cache import invalidate_dashboard_stats
 from core.config import jellyfin_configured, plex_enabled
 from core.system_utils import get_disk_usage, detect_zfs, parse_size_bytes, size_setting_error, format_cache_age
 from core.file_operations import (
@@ -202,6 +203,7 @@ def save_plex_settings(request: Request, form_data: ImmutableMultiDict = Depends
     })
 
     if success:
+        invalidate_dashboard_stats()
         return templates.TemplateResponse(
             request,
             "partials/alert.html",
@@ -241,6 +243,7 @@ def save_jellyfin_settings(request: Request, form_data: ImmutableMultiDict = Dep
         "favorites_toggle": form_data.get("jellyfin_favorites_toggle") == "true",
     })
     if success:
+        invalidate_dashboard_stats()
         return _page_alert("success", "Jellyfin settings saved")
     return _page_alert("error", "Failed to save Jellyfin settings")
 

@@ -699,6 +699,10 @@ def setup_complete_post(request: Request):
     # Clear the in-memory setup state
     clear_setup_state()
 
+    # The dashboard's stats were worked out before there was a media server
+    from web.services.web_cache import invalidate_dashboard_stats
+    invalidate_dashboard_stats()
+
     # Redirect to dashboard
     return RedirectResponse(url="/", status_code=303)
 

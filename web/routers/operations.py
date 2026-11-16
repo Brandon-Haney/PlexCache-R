@@ -189,7 +189,8 @@ def get_recent_activity(request: Request):
         # Pass extra context when activity is empty for contextual empty states
         if not activity:
             settings_service = get_settings_service()
-            context["plex_connected"] = settings_service.check_plex_connection()
+            context["media_server_connected"] = any(
+                server["connected"] for server in settings_service.media_server_status())
             context["last_run"] = settings_service.get_last_run_time()
 
         return templates.TemplateResponse(

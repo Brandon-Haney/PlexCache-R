@@ -167,3 +167,70 @@ def test_editing_a_mapping_keeps_the_jellyfin_fields(svc):
 
 def test_jellyfin_path_is_trimmed_like_the_other_paths(svc):
     assert svc._sanitize_path_mapping({"jellyfin_path": " /media/movies "})["jellyfin_path"] == "/media/movies"
+
+
+# -- the settings file after a run ------------------------------------------------
+# Every CLI or scheduled run loads the config with persist_updates=True, which
+# rewrites path_mappings. That rewrite must keep the Jellyfin fields and an
+# empty plex_path: "/" would match every path and send each Jellyfin-only
+# library's files to the first such library's real path.
+
+def _run_load(tmp_path, mappings, **extra):
+    from core.config import ConfigManager
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    settings = {
+        "PLEX_URL": "http://plex:32400", "PLEX_TOKEN": "tok", "number_episodes": 5, "valid_sections": [1],
+        "days_to_monitor": 99, "users_toggle": False, "watchlist_toggle": False, "watchlist_episodes": 3,
+        "watched_move": True, "max_concurrent_moves_array": 2, "max_concurrent_moves_cache": 5,
+        "cache_dir": str(cache_dir), "path_mappings": mappings, **extra,
+    }
+    path = tmp_path / "plexcache_settings.json"
+    path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    config = ConfigManager(str(path))
+    config.load_config()  # persist_updates=True, as a run does
+    return config, json.loads(path.read_text(encoding="utf-8"))["path_mappings"]
+
+
+JELLYFIN_ONLY = [
+    {"name": "Anime", "plex_path": "", "real_path": "/mnt/user/anime/", "cache_path": "/mnt/cache/anime/",
+     "cacheable": True, "enabled": True, "jellyfin_path": "/media/anime", "jellyfin_library_id": "lib-anime",
+     "jellyfin_enabled": True},
+    {"name": "Kids", "plex_path": "", "real_path": "/mnt/user/kids/", "cache_path": "/mnt/cache/kids/",
+     "cacheable": True, "enabled": True, "jellyfin_path": "/media/kids", "jellyfin_library_id": "lib-kids",
+     "jellyfin_enabled": False},
+]
+
+
+@pytest.mark.critical
+def test_a_run_keeps_the_jellyfin_fields_and_an_empty_plex_path(tmp_path):
+    config, saved = _run_load(tmp_path, JELLYFIN_ONLY, plex_enabled=False, jellyfin_enabled=True,
+                              jellyfin_url="http://jf:8096", jellyfin_api_key="key")
+    assert [(m["plex_path"], m["jellyfin_path"], m["jellyfin_library_id"], m["jellyfin_enabled"]) for m in saved] == [
+        ("", "/media/anime", "lib-anime", True), ("", "/media/kids", "lib-kids", False)]
+    assert [m.plex_path for m in config.paths.path_mappings] == ["", ""]
+
+
+@pytest.mark.critical
+def test_two_jellyfin_only_libraries_keep_their_own_real_paths(tmp_path):
+    both_on = [dict(m, jellyfin_enabled=True) for m in JELLYFIN_ONLY]
+    config, _ = _run_load(tmp_path, both_on, plex_enabled=False, jellyfin_enabled=True,
+                          jellyfin_url="http://jf:8096", jellyfin_api_key="key")
+    from core.jellyfin_api import jellyfin_path_table
+    table, _ = jellyfin_path_table(config.jellyfin, config.paths.path_mappings)
+    assert table == {"/media/anime": "/mnt/user/anime/", "/media/kids": "/mnt/user/kids/"}
+    jellyfin = JellyfinManager("http://jf", "k", path_mappings=table)
+    modifier = MultiPathModifier(config.paths.path_mappings)
+    real, _ = modifier.convert_plex_to_real(jellyfin.to_plex_path("/media/kids/Bluey/S01E01.mkv"))
+    assert real == "/mnt/user/kids/Bluey/S01E01.mkv"
+    # A Plex path no mapping covers stays unmapped, not caught by an empty plex_path
+    assert modifier.convert_plex_to_real("/data/other/film.mkv")[0] in (None, "/data/other/film.mkv")
+
+
+def test_a_plex_only_file_is_rewritten_as_before(tmp_path):
+    _, saved = _run_load(tmp_path, [{"name": "Movies", "plex_path": "/data/movies/", "real_path": "/mnt/user/movies/",
+                                     "cache_path": "/mnt/cache/movies/", "cacheable": True, "enabled": True,
+                                     "section_id": 1}])
+    assert saved == [{"name": "Movies", "plex_path": "/data/movies/", "real_path": "/mnt/user/movies/",
+                      "cache_path": "/mnt/cache/movies/", "host_cache_path": None, "cacheable": True,
+                      "enabled": True, "section_id": 1}]

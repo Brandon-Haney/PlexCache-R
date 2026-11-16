@@ -18,6 +18,7 @@ from starlette.datastructures import ImmutableMultiDict
 from web.config import templates, CONFIG_DIR, PLEXCACHE_PRODUCT_VERSION
 from web.dependencies import parse_form
 from web.services import get_settings_service, get_scheduler_service
+from core.config import jellyfin_configured, plex_enabled
 from core.system_utils import get_disk_usage, detect_zfs, parse_size_bytes, size_setting_error, format_cache_age
 from core.file_operations import (
     PRIORITY_RANGE_ONDECK_MIN,
@@ -491,10 +492,10 @@ def test_user_token(request: Request, form_data: ImmutableMultiDict = Depends(pa
 
 
 def _custom_mappings(mappings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Mappings not linked to a Plex library, each tagged with its list index."""
+    """Mappings not linked to a Plex or Jellyfin library, each tagged with its list index."""
     custom = []
     for i, m in enumerate(mappings):
-        if m.get("section_id") is None:
+        if m.get("section_id") is None and not m.get("jellyfin_library_id"):
             m_copy = dict(m)
             m_copy["_index"] = i
             custom.append(m_copy)
@@ -731,7 +732,70 @@ def settings_libraries(request: Request):
         context["libraries_lazy"] = True
         mappings = settings_service.get_all().get("path_mappings", [])
     context["orphan_mappings"] = _custom_mappings(mappings)
+    raw = settings_service.get_all()
+    context["plex_on"] = plex_enabled(raw)
+    context["jellyfin_on"] = jellyfin_configured(raw)
     return templates.TemplateResponse(request, "settings/libraries.html", context)
+
+
+def _jellyfin_card(settings_service, library_id: str) -> Optional[Dict[str, Any]]:
+    return next((c for c in settings_service.jellyfin_library_cards()["cards"]
+                 if c["library"]["id"] == library_id), None)
+
+
+def _render_jellyfin_card(request: Request, card: Optional[Dict[str, Any]]) -> HTMLResponse:
+    if card is None:
+        return _page_alert("error", "That Jellyfin library wasn't found. Reload the page.")
+    return templates.TemplateResponse(request, "settings/partials/jellyfin_library_card.html", {"card": card})
+
+
+@router.get("/libraries/jellyfin", response_class=HTMLResponse)
+def settings_jellyfin_libraries(request: Request, retry: bool = False):
+    """The Libraries tab's Jellyfin cards (lazy-loaded: they come from Jellyfin; Retry asks again)"""
+    settings_service = get_settings_service()
+    if retry:
+        settings_service._jellyfin_cache = {}
+    return templates.TemplateResponse(
+        request, "settings/partials/jellyfin_library_cards.html", settings_service.jellyfin_library_cards())
+
+
+@router.post("/libraries/jellyfin/{library_id}/toggle", response_class=HTMLResponse)
+def toggle_jellyfin_library(request: Request, library_id: str):
+    """Switch a Jellyfin library on (linking or creating its mappings) or off"""
+    settings_service = get_settings_service()
+    card = _jellyfin_card(settings_service, library_id)
+    if card is None:
+        return _render_jellyfin_card(request, None)
+    settings_service.set_jellyfin_library(card["library"], on=not card["enabled"])
+    return _render_jellyfin_card(request, _jellyfin_card(settings_service, library_id))
+
+
+@router.put("/libraries/jellyfin/{library_id}/paths", response_class=HTMLResponse)
+async def update_jellyfin_library_paths(request: Request, library_id: str):
+    """Save the paths of a Jellyfin library's mappings (Jellyfin, real and cache path)"""
+    settings_service = get_settings_service()
+    form = await request.form()
+    raw = settings_service._load_raw()
+    mappings = raw.get("path_mappings", [])
+    for pos, index in enumerate(i for i, m in enumerate(mappings) if m.get("jellyfin_library_id") == library_id):
+        if f"real_path_{pos}" not in form:
+            continue
+        cache_path = (form.get(f"cache_path_{pos}") or "").strip()
+        host_cache_path = (form.get(f"host_cache_path_{pos}") or "").strip() or cache_path
+        updated = dict(mappings[index])
+        updated.update({
+            "jellyfin_path": (form.get(f"jellyfin_path_{pos}") or "").strip().rstrip("/"),
+            "real_path": form.get(f"real_path_{pos}") or "",
+            "cache_path": cache_path or None,
+            "host_cache_path": host_cache_path or None,
+            "cacheable": form.get(f"cacheable_{pos}") == "on",
+        })
+        updated.pop("auto_fill_recognized", None)  # reviewed now
+        mappings[index] = settings_service._sanitize_path_mapping(updated)
+    raw["path_mappings"] = mappings
+    if not settings_service._save_raw(raw):
+        return _page_alert("error", "Failed to save the paths")
+    return _render_jellyfin_card(request, _jellyfin_card(settings_service, library_id))
 
 
 @router.get("/libraries/cards", response_class=HTMLResponse)

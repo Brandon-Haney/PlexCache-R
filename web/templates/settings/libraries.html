@@ -4,11 +4,13 @@
 <div class="card">
     <div class="card-header">
         <i data-lucide="library"></i>
-        <h2>Plex Libraries</h2>
+        <h2>{% if jellyfin_on %}Libraries{% else %}Plex Libraries{% endif %}</h2>
     </div>
     <div class="card-body">
         <p class="text-muted mb-2">Select libraries to cache and configure their path mappings.</p>
 
+        {% if plex_on %}
+        {% if jellyfin_on %}<h3 class="library-server-heading"><i data-lucide="link"></i> Plex</h3>{% endif %}
         {# Lazy-loaded when the list has to come from Plex (skeleton meanwhile) #}
         <div id="library-cards-section" data-setting-id="library_toggles"
              {% if libraries_lazy %}hx-get="/settings/libraries/cards" hx-trigger="load" hx-swap="innerHTML"{% endif %}>
@@ -18,6 +20,16 @@
                 {% include "settings/partials/library_cards_section.html" %}
             {% endif %}
         </div>
+        {% endif %}
+
+        {% if jellyfin_on %}
+        <h3 class="library-server-heading"><i data-lucide="server"></i> Jellyfin</h3>
+        {# Always lazy: the list comes from Jellyfin #}
+        <div id="jellyfin-library-section" data-setting-id="jellyfin_library_toggles"
+             hx-get="/settings/libraries/jellyfin" hx-trigger="load" hx-swap="innerHTML">
+            {% include "settings/partials/library_cards_skeleton.html" %}
+        </div>
+        {% endif %}
 
         {% include "settings/partials/custom_mappings.html" %}
 

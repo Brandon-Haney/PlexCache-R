@@ -2430,3 +2430,58 @@ article nav ul li a[aria-current="page"] {
 @media (prefers-reduced-motion: reduce) {
     .library-stale-note .btn.htmx-request svg { animation: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Libraries tab — Plex and Jellyfin sections, Jellyfin library cards
+   (settings/partials/jellyfin_library_card.html)
+   ───────────────────────────────────────────────────────────────────── */
+.library-server-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1.25rem 0 0.75rem;
+    font-size: 1rem;
+    color: var(--plex-orange-text);
+}
+.library-server-heading:first-of-type { margin-top: 0.25rem; }
+.library-server-heading svg { width: 18px; height: 18px; }
+.jellyfin-mapping-view {
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--plex-bg-darker);
+    border-radius: var(--plex-radius-sm);
+    border: 1px solid transparent;
+}
+.jellyfin-mapping-view.needs-attention { border-color: var(--plex-warning); }
+.jellyfin-mapping-note {
+    display: flex;
+    gap: 0.4rem;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: var(--plex-radius-sm);
+    background: color-mix(in srgb, var(--plex-warning) 10%, transparent);
+    color: var(--plex-warning);
+    font-size: 0.8rem;
+}
+.jellyfin-mapping-note svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 0.15rem; }
+.jellyfin-mapping-paths {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.25rem 0.75rem;
+    align-items: baseline;
+}
+.jellyfin-mapping-paths code { overflow-wrap: anywhere; }
+.jellyfin-edit-paths { margin-top: 0.25rem; }
+.jellyfin-edit-paths > summary { list-style: none; display: inline-flex; }  /* a button, like the Plex cards' Edit Paths */
+.jellyfin-edit-paths > summary::-webkit-details-marker { display: none; }
+.jellyfin-edit-paths form { margin-top: 0.75rem; }
+.jellyfin-edit-mapping {
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: var(--plex-bg-darker);
+    border: 1px solid var(--plex-border);
+    border-radius: var(--plex-radius-sm);
+}
+.jellyfin-edit-mapping__name { font-weight: 600; margin-bottom: 0.5rem; }

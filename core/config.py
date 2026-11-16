@@ -73,6 +73,10 @@ class PathMapping:
     # its real_path for a library only Jellyfin has.
     jellyfin_path: str = ""
     jellyfin_library_id: Optional[str] = None
+    # The Jellyfin library is switched off on Settings > Libraries. The mapping
+    # itself stays enabled, so Plex (if it shares it) and moves of files already
+    # cached are unaffected.
+    jellyfin_enabled: bool = True
 
 
 @dataclass
@@ -794,6 +798,7 @@ class ConfigManager:
                 section_id=mapping_data.get('section_id'),
                 jellyfin_path=(mapping_data.get('jellyfin_path') or '').strip(),
                 jellyfin_library_id=mapping_data.get('jellyfin_library_id'),
+                jellyfin_enabled=mapping_data.get('jellyfin_enabled', True) is not False,
             )
             self.paths.path_mappings.append(mapping)
             if host_cache_path and host_cache_path != cache_path:

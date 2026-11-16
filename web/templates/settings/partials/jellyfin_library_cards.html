@@ -1,0 +1,31 @@
+{# The Libraries tab's Jellyfin cards, loaded into #jellyfin-library-section by
+   GET /settings/libraries/jellyfin. When Jellyfin can't be reached, a note says
+   why and offers Retry. #}
+{% if error %}
+<div class="alert alert-warning library-stale-note" role="status">
+    <i data-lucide="cloud-off"></i>
+    <div class="library-stale-note__text">
+        <strong>Couldn't reach Jellyfin</strong>, so its libraries can't be shown. Check the
+        <a href="/settings/plex">Jellyfin connection</a>.
+        <div class="library-stale-note__why">{{ error }}</div>
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary"
+            hx-get="/settings/libraries/jellyfin?retry=true"
+            hx-target="#jellyfin-library-section"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this">
+        <i data-lucide="refresh-cw"></i> Retry
+    </button>
+</div>
+{% elif not cards %}
+<div class="alert alert-info">
+    <i data-lucide="alert-circle"></i>
+    <span>Jellyfin has no libraries yet.</span>
+</div>
+{% endif %}
+
+<div id="jellyfin-library-cards">
+    {% for card in cards %}
+        {% include "settings/partials/jellyfin_library_card.html" %}
+    {% endfor %}
+</div>

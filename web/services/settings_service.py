@@ -235,7 +235,7 @@ class SettingsService:
 
     # Mapping fields the mapping editors don't show yet: an edit keeps them
     # (the Plex library a mapping belongs to, Jellyfin's path and library)
-    KEPT_MAPPING_FIELDS = ("section_id", "jellyfin_path", "jellyfin_library_id")
+    KEPT_MAPPING_FIELDS = ("section_id", "jellyfin_path", "jellyfin_library_id", "jellyfin_enabled")
 
     @classmethod
     def keep_unedited_mapping_fields(cls, existing: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
@@ -435,6 +435,82 @@ class SettingsService:
     def get_jellyfin_users(self) -> Dict[str, Any]:
         """{"items": [user, ...], "error": str or None} (core.jellyfin_api.JellyfinManager.list_users)."""
         return self._jellyfin_cached("users", lambda client: client.list_users())
+
+    # ------------------------------------------------------------------
+    # Jellyfin libraries on Settings > Libraries
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _folder(path: Optional[str]) -> str:
+        return (path or "").strip().rstrip("/")
+
+    def _mapping_for_jellyfin_folder(self, mappings: List[Dict[str, Any]], folder: str,
+                                     guess: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """The existing mapping a Jellyfin library folder belongs to, if any.
+
+        In order: one already set to that Jellyfin path; one whose Plex or real
+        path is the same folder (both servers mount it alike); one whose real
+        path is where the folder's files would be (guess), so Plex's /data/movies
+        and Jellyfin's /media/movies share one mapping, and one tracker entry.
+        """
+        for match in (
+            lambda m: self._folder(m.get("jellyfin_path")) == folder,
+            lambda m: folder in (self._folder(m.get("plex_path")), self._folder(m.get("real_path"))),
+            lambda m: self._folder(m.get("real_path")) == self._folder(guess.get("real_path")),
+        ):
+            found = next((m for m in mappings if match(m)), None)
+            if found is not None:
+                return found
+        return None
+
+    def set_jellyfin_library(self, library: Dict[str, Any], on: bool) -> bool:
+        """Switch a Jellyfin library on (linking or creating a mapping per folder) or off."""
+        raw = self._load_raw()
+        mappings = raw.setdefault("path_mappings", [])
+        library_id = library["id"]
+        if not on:
+            for m in mappings:
+                if m.get("jellyfin_library_id") == library_id:
+                    m["jellyfin_enabled"] = False
+            return self._save_raw(raw)
+
+        for location in library.get("locations", []):
+            folder = self._folder(location)
+            if not folder:
+                continue
+            guess = self.auto_fill_mapping(library, folder, raw)
+            mapping = self._mapping_for_jellyfin_folder(mappings, folder, guess)
+            if mapping is None:
+                # A library only Jellyfin has: its own mapping, without a Plex path
+                mapping = {k: v for k, v in guess.items() if k not in ("plex_path", "section_id")}
+                mapping["plex_path"] = ""
+                mappings.append(mapping)
+            mapping["jellyfin_path"] = self._folder(mapping.get("jellyfin_path")) or folder
+            mapping["jellyfin_library_id"] = library_id
+            mapping["jellyfin_enabled"] = True
+            # A mapping shared with a Plex library keeps that library's switch
+            # (enabled); only a Jellyfin-only mapping is switched on here.
+            if mapping.get("section_id") is None:
+                mapping["enabled"] = True
+        return self._save_raw(raw)
+
+    def jellyfin_library_cards(self) -> Dict[str, Any]:
+        """Cards for Settings > Libraries: each Jellyfin library with the mappings it uses."""
+        fetched = self.get_jellyfin_libraries()
+        mappings = self._load_raw().get("path_mappings", [])
+        cards = []
+        for library in fetched["items"]:
+            linked = []
+            for index, m in enumerate(mappings):
+                if m.get("jellyfin_library_id") == library["id"]:
+                    linked.append({
+                        **m, "_index": index,
+                        # Shares its folder with a Plex library that is switched off
+                        "_held_by_plex": m.get("section_id") is not None and not m.get("enabled", True),
+                    })
+            enabled = any(m.get("jellyfin_enabled", True) is not False for m in linked)
+            cards.append({"library": library, "enabled": enabled, "mappings": linked})
+        return {"cards": cards, "error": fetched["error"]}
 
     def get_path_mappings(self) -> List[Dict[str, Any]]:
         """Get path mappings"""

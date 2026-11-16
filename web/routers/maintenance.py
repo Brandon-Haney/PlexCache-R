@@ -963,10 +963,12 @@ def get_duplicates(request: Request, show_ignored: bool = Query(default=False)):
         for i in arr_instances
     )
 
+    from core.config import plex_enabled
     return templates.TemplateResponse(
         request,
         "maintenance/partials/duplicate_card.html",
         {
+            "plex_in_use": plex_enabled(get_settings_service().get_all()),
             "scan_results": results,
             "arr_configured": arr_configured,
             "ignored_count": len(ignores),

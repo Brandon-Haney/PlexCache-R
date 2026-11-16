@@ -1,6 +1,17 @@
 <!-- Plex Duplicate Files - HTMX partial loaded inside audit_results.html -->
 
-{% if not scan_results %}
+{% if plex_in_use is defined and not plex_in_use %}
+<!-- State 0: Plex isn't in use. The scan reads Plex's libraries; Jellyfin isn't scanned yet. -->
+<div style="text-align: center; padding: 2rem 1rem;">
+    <i data-lucide="scan-search" style="width: 40px; height: 40px; color: var(--plex-text-muted); margin-bottom: 0.75rem;"></i>
+    <p style="margin: 0 0 0.5rem 0; font-weight: 500;">Needs Plex</p>
+    <p class="text-muted" style="margin: 0; font-size: 0.9rem;">
+        The duplicate scan reads Plex's libraries, and Plex isn't in use here.
+        Jellyfin libraries aren't scanned for duplicates yet.
+    </p>
+</div>
+
+{% elif not scan_results %}
 <!-- State 1: No scan data -->
 <div style="text-align: center; padding: 2rem 1rem;">
     <i data-lucide="scan-search" style="width: 40px; height: 40px; color: var(--plex-text-muted); margin-bottom: 0.75rem;"></i>

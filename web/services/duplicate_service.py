@@ -228,6 +228,11 @@ class DuplicateService:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
 
+            from core.config import plex_enabled
+            if not plex_enabled(settings):
+                return ActionResult(success=False,
+                                    message="The duplicate scan reads Plex libraries, and Plex isn't in use")
+
             plex_url = settings.get("PLEX_URL", "").strip()
             plex_token = settings.get("PLEX_TOKEN", "").strip()
             if not plex_url or not plex_token:

@@ -63,6 +63,8 @@ KNOWN_SETTINGS_KEYS = frozenset({
     "jellyfin_favorites_toggle",
     # New-release notice in the sidebar (web/update_check.py)
     "update_check",
+    # Which media servers a run uses (core.config.plex_enabled / jellyfin_configured)
+    "plex_enabled", "jellyfin_enabled",
     # Legacy keys (migrated or ignored on load)
     "sonarr_enabled", "sonarr_url", "sonarr_api_key",
     "radarr_enabled", "radarr_url", "radarr_api_key",

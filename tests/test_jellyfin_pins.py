@@ -3,7 +3,10 @@
 A pin made from Jellyfin is stored under the Jellyfin item id with source
 "jellyfin" and resolved by Jellyfin: a movie or episode to its chosen version,
 a show or season to its episodes, by the same version rule as Plex pins. It is
-never pruned, since Jellyfin gives a replaced file a new id. The run applies
+never pruned, since Jellyfin gives a replaced file a new id. Seasons and
+episodes come from the TV endpoints (/Shows/{id}/Seasons, /Shows/{id}/Episodes
+?seasonId=): without a user, /Items with a season as parentId misses episodes
+that sit directly in the series folder. The run applies
 each server's pins, the pin picker searches and expands both servers, and the
 budget, Recently Added and Cached Files see Jellyfin pins like Plex ones.
 """
@@ -59,6 +62,8 @@ def _answer(path, params):
     params = params or {}
     if path == "/Library/VirtualFolders":
         return LIBRARIES
+    if path.startswith("/Shows/"):
+        return _answer_tv(path, params)
     if path != "/Items":
         raise AssertionError(f"unexpected {path}")
     if "ids" in params:
@@ -68,12 +73,19 @@ def _answer(path, params):
         stray = {"Id": "9" * 32, "Name": "Dune home video", "Type": "Movie", "Path": "/media/home/dune.mkv",
                  "MediaSources": [{"Path": "/media/home/dune.mkv", "Size": 1}]}
         return {"Items": [i for i in (FILM, SHOW, stray) if term in i["Name"].lower()]}
-    parent, kinds = params.get("parentId"), params.get("includeItemTypes")
-    if kinds == "Season":
-        return {"Items": [s for s in SEASONS if s["SeriesId"] == parent]}
-    if kinds == "Episode":
-        return {"Items": [e for e in EPISODES if parent in (e["SeriesId"], e["SeasonId"])]}
     raise AssertionError(f"unexpected /Items {params}")
+
+
+def _answer_tv(path, params):
+    """/Shows/{series}/Seasons and /Shows/{series}/Episodes[?seasonId=], as Jellyfin
+    answers them without a user (TvShowsController)."""
+    _, _, series, what = path.split("/")
+    if what == "Seasons":
+        return {"Items": [s for s in SEASONS if s["SeriesId"] == series]}
+    episodes = [e for e in EPISODES if e["SeriesId"] == series]
+    if "seasonId" in params:
+        episodes = [e for e in episodes if e["SeasonId"] == params["seasonId"]]
+    return {"Items": episodes}
 
 
 def _jellyfin(calls=None):

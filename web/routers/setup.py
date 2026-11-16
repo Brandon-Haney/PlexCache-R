@@ -650,18 +650,9 @@ def setup_step6_post(request: Request, form_data: ImmutableMultiDict = Depends(p
                 pass
 
         # Password fallback — only save credentials when toggle is on. Without
-        # Plex there's no Plex sign-in, so the password login is the login.
-        jellyfin_only = _setup_state.get("_setup_server") == "jellyfin"
-        password_enabled = form_data.get("auth_password_enabled") == "on" or jellyfin_only
-        if jellyfin_only and not (form_data.get("auth_password_username", "").strip()
-                                  and form_data.get("auth_password", "").strip()):
-            return templates.TemplateResponse(request, "setup/step6.html", {
-                "page_title": "Setup", "step": 6, "total_steps": 7, "server": "jellyfin",
-                "auth_enabled": True, "auth_password_enabled": True,
-                "auth_session_hours": auth_state["auth_session_hours"],
-                "auth_password_username": form_data.get("auth_password_username", ""),
-                "error": "Without Plex, login uses a username and password. Enter both, or switch Require Login off.",
-            })
+        # Plex, Jellyfin administrators sign in with their Jellyfin account
+        # (AuthService.validate_jellyfin_login), so the password stays optional.
+        password_enabled = form_data.get("auth_password_enabled") == "on"
         auth_state["auth_password_enabled"] = password_enabled
 
         if password_enabled:

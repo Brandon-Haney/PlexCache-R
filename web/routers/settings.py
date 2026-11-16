@@ -1490,6 +1490,7 @@ def settings_security(request: Request):
             "page_title": "Security Settings",
             "active_tab": "security",
             "settings": settings,
+            "login_methods": auth_service.login_methods(),
             "active_sessions": auth_service.active_session_count(),
             "api_base_url": _api_base_url(request),
         }
@@ -1570,8 +1571,15 @@ def save_security_settings(
             save_data["auth_password_hash"] = pw_hash
             save_data["auth_password_salt"] = pw_salt
 
-    # Capture admin identity when enabling auth for the first time
-    if now_enabled and not was_enabled:
+    # Capture admin identity when enabling auth for the first time. Only Plex
+    # sign-in needs it; Jellyfin checks that whoever signs in is one of its
+    # administrators. Without either, the password is the only way in.
+    methods = auth_service.login_methods()
+    if now_enabled and not was_enabled and not methods["plex"]:
+        if not methods["jellyfin"] and not password_enabled:
+            return _page_alert("error", "Without Plex or Jellyfin, login uses a password. "
+                                        "Turn on Enable Password Login and set one first.")
+    elif now_enabled and not was_enabled:
         result = auth_service.capture_admin_identity()
         if result is None:
             return templates.TemplateResponse(

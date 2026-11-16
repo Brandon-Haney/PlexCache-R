@@ -3,8 +3,8 @@
 Step 2 offers "Use Jellyfin": it checks the URL and API key against Jellyfin,
 then steps 3 and 4 list Jellyfin's libraries and users. Library folders get
 Jellyfin-only path mappings, unticked users become jellyfin_skip_users, and
-login (if switched on) uses a username and password, since there's no Plex
-sign-in. The settings the wizard saves load and validate as a Jellyfin-only
+login (if switched on) is a Jellyfin administrator's account, with the
+password as an optional fallback. The settings the wizard saves load and validate as a Jellyfin-only
 install, and the wizard's own working keys (starting with "_") are not saved.
 """
 
@@ -101,14 +101,15 @@ def test_steps_3_and_4_show_jellyfins_libraries_and_users(wizard):
     assert "Jellyfin Users" in step4 and 'value="roger"' in step4 and 'value="mia"' in step4
 
 
-def test_login_without_plex_needs_a_password(wizard):
+def test_login_without_plex_signs_in_with_jellyfin(wizard):
+    """Jellyfin administrators sign in with their Jellyfin account, so the password stays optional."""
     client, *_ = wizard
     _through_step5(client)
-    refused = client.post("/setup/step6", data={"auth_enabled": "on"})
-    assert refused.status_code == 200 and "username and password" in refused.text
-    accepted = client.post("/setup/step6", data={"auth_enabled": "on", "auth_password_username": "admin",
-                                                "auth_password": "s3cret"})
-    assert accepted.status_code == 303
+    page = client.get("/setup?step=6").text
+    assert "Jellyfin administrators sign in" in page and "Admin identity will be captured" not in page
+    assert client.post("/setup/step6", data={"auth_enabled": "on"}).status_code == 303
+    from web.routers.setup import _setup_state
+    assert _setup_state["auth_enabled"] is True and _setup_state["auth_password_enabled"] is False
 
 
 @pytest.mark.critical

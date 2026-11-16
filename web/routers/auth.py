@@ -51,17 +51,25 @@ def login_page(request: Request, next: str = "/"):
     if session_token and auth_service.validate_session(session_token):
         return RedirectResponse(url=safe_next, status_code=302)
 
-    settings = auth_service._load_settings()
-    password_enabled = settings.get("auth_password_enabled", False)
+    return _login_page(request, safe_next)
 
+
+def _login_page(request: Request, next_url: str, error: str = None, status_code: int = 200,
+                show_jellyfin: bool = False):
+    """The login page with the sign-ins in use (AuthService.login_methods)."""
+    methods = get_auth_service().login_methods()
     return templates.TemplateResponse(
         request,
         "auth/login.html",
         {
-            "next_url": safe_next,
-            "password_enabled": password_enabled,
-            "error": None,
+            "next_url": next_url,
+            "password_enabled": methods["password"],
+            "plex_login": methods["plex"],
+            "jellyfin_login": methods["jellyfin"],
+            "show_jellyfin": show_jellyfin,
+            "error": error,
         },
+        status_code=status_code,
     )
 
 
@@ -202,17 +210,7 @@ def password_login(
     # Check rate limit
     allowed, retry_after = auth_service.check_rate_limit(client_ip)
     if not allowed:
-        settings = auth_service._load_settings()
-        return templates.TemplateResponse(
-            request,
-            "auth/login.html",
-            {
-                "next_url": safe_next,
-                "password_enabled": settings.get("auth_password_enabled", False),
-                "error": f"Too many login attempts. Try again in {retry_after} seconds.",
-            },
-            status_code=429,
-        )
+        return _login_page(request, safe_next, f"Too many login attempts. Try again in {retry_after} seconds.", 429)
 
     # Validate credentials
     if auth_service.validate_password(username, password):
@@ -224,30 +222,56 @@ def password_login(
             remember_me=remember_me,
         )
 
-        response = RedirectResponse(url=safe_next, status_code=302)
-        response.set_cookie(
-            key="plexcache_session",
-            value=session_token,
-            max_age=auth_service.get_session_ttl(remember_me),
-            httponly=True,
-            samesite="lax",
-            secure=str(request.url.scheme) == "https",
-            path="/",
-        )
-        return response
+        return _signed_in(request, session_token, safe_next, remember_me)
 
     auth_service.record_login_attempt(client_ip, False)
-    settings = auth_service._load_settings()
-    return templates.TemplateResponse(
-        request,
-        "auth/login.html",
-        {
-            "next_url": safe_next,
-            "password_enabled": settings.get("auth_password_enabled", False),
-            "error": "Invalid username or password",
-        },
-        status_code=401,
+    return _login_page(request, safe_next, "Invalid username or password", 401)
+
+
+def _signed_in(request: Request, session_token: str, next_url: str, remember_me: bool) -> RedirectResponse:
+    response = RedirectResponse(url=next_url, status_code=302)
+    response.set_cookie(
+        key="plexcache_session",
+        value=session_token,
+        max_age=get_auth_service().get_session_ttl(remember_me),
+        httponly=True,
+        samesite="lax",
+        secure=str(request.url.scheme) == "https",
+        path="/",
     )
+    return response
+
+
+@router.post("/login/jellyfin")
+def jellyfin_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(""),
+    remember_me: bool = Form(False),
+    next_url: str = Form("/"),
+):
+    """Sign in with a Jellyfin administrator account (rate limited like the password login)."""
+    auth_service = get_auth_service()
+    client_ip = _get_client_ip(request)
+    safe_next = next_url if _is_safe_redirect(next_url) else "/"
+
+    allowed, retry_after = auth_service.check_rate_limit(client_ip)
+    if not allowed:
+        return _login_page(request, safe_next, f"Too many login attempts. Try again in {retry_after} seconds.", 429,
+                           show_jellyfin=True)
+
+    account, error = auth_service.validate_jellyfin_login(username, password)
+    if account is None:
+        auth_service.record_login_attempt(client_ip, False)
+        return _login_page(request, safe_next, error, 401, show_jellyfin=True)
+
+    auth_service.record_login_attempt(client_ip, True)
+    session_token = auth_service.create_session(
+        plex_id=account["account_id"],
+        username=account["username"],
+        remember_me=remember_me,
+    )
+    return _signed_in(request, session_token, safe_next, remember_me)
 
 
 @router.post("/logout")

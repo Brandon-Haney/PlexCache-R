@@ -86,7 +86,17 @@
                     <div class="security-toggle-row">
                         <div>
                             <label for="auth_enabled" style="margin-bottom: 0;">Require Login</label>
-                            <div class="form-hint">Only the Plex server owner can sign in to access the Web UI</div>
+                            <div class="form-hint">
+                                {%- if login_methods is not defined or (login_methods.plex and not login_methods.jellyfin) -%}
+                                Only the Plex server owner can sign in to access the Web UI
+                                {%- elif login_methods.plex -%}
+                                The Plex server owner and Jellyfin administrators can sign in to access the Web UI
+                                {%- elif login_methods.jellyfin -%}
+                                Jellyfin administrators sign in with their Jellyfin account to access the Web UI
+                                {%- else -%}
+                                Sign in with the password below to access the Web UI
+                                {%- endif -%}
+                            </div>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="auth_enabled" name="auth_enabled" value="true"
@@ -97,7 +107,7 @@
                     </div>
                 </div>
 
-                {% if settings.auth_admin_username %}
+                {% if settings.auth_admin_username and (login_methods is not defined or login_methods.plex) %}
                 <div class="security-info-box" style="margin-top: 0.75rem;">
                     <i data-lucide="user-check" style="width: 16px; height: 16px; vertical-align: middle; color: var(--plex-success);"></i>
                     Admin: <strong>{{ settings.auth_admin_username }}</strong>
@@ -129,7 +139,13 @@
                 </div>
 
                 <div class="form-hint" style="margin-bottom: 1rem;">
+                    {% if login_methods is defined and not login_methods.plex and not login_methods.jellyfin -%}
+                    Without Plex or Jellyfin, this is how you sign in.
+                    {%- elif login_methods is defined and not login_methods.plex -%}
+                    Optional password login, for when Jellyfin is unavailable.
+                    {%- else -%}
                     Optional password login as fallback when Plex OAuth is unavailable.
+                    {%- endif %}
                 </div>
 
                 <div class="form-group" data-setting-id="auth_password_enabled" style="margin-bottom: 0.75rem;">

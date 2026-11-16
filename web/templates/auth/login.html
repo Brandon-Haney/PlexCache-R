@@ -115,6 +115,36 @@
             width: auto;
         }
 
+        /* Jellyfin sign-in: a button that opens its form, or the form itself
+           when it is the only way in */
+        .btn-jellyfin {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            margin-top: 0.75rem;
+            background: color-mix(in srgb, var(--plex-purple) 8%, transparent);
+            border: 1px solid color-mix(in srgb, var(--plex-purple) 45%, transparent);
+            border-radius: 8px;
+            color: var(--plex-text);
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-jellyfin:hover {
+            background: color-mix(in srgb, var(--plex-purple) 15%, transparent);
+        }
+
+        #jellyfin-form {
+            margin-top: 0.75rem;
+        }
+
+        .login-form-title {
+            font-size: 0.85rem;
+            color: var(--plex-text-muted);
+            margin: 0 0 0.5rem 0;
+        }
+
         /* OAuth status */
         .oauth-status {
             text-align: center;
@@ -272,9 +302,10 @@
                 </button>
             </form>
 
-            <div class="login-divider">Or sign in with</div>
+            {% if plex_login or jellyfin_login %}<div class="login-divider">Or sign in with</div>{% endif %}
             {% endif %}
 
+            {% if plex_login %}
             <!-- Plex OAuth -->
             <div id="oauth-section">
                 <button type="button" class="btn-plex" id="plex-oauth-btn" onclick="startPlexOAuth()">
@@ -293,6 +324,35 @@
                     <span id="oauth-error-text"></span>
                 </div>
             </div>
+            {% endif %}
+
+            {% if jellyfin_login %}
+            <!-- Jellyfin: administrators of the Jellyfin server sign in with their Jellyfin account -->
+            {% set jellyfin_only_way = not password_enabled and not plex_login %}
+            {% if not jellyfin_only_way %}
+            <button type="button" class="btn-jellyfin" id="jellyfin-btn" onclick="showJellyfinForm()"
+                    {% if show_jellyfin %}style="display: none;"{% endif %}>
+                {% if not password_enabled %}Login with {% endif %}Jellyfin
+            </button>
+            {% endif %}
+            <form method="post" action="/auth/login/jellyfin" id="jellyfin-form"
+                  {% if not jellyfin_only_way and not show_jellyfin %}style="display: none;"{% endif %}>
+                <p class="login-form-title">Sign in with your Jellyfin administrator account</p>
+                <input type="hidden" name="next_url" value="{{ next_url }}">
+                <input type="text" class="login-input" id="jellyfin_username" name="username"
+                       placeholder="Jellyfin username" required autocomplete="username">
+                <input type="password" class="login-input" id="jellyfin_password" name="password"
+                       placeholder="Jellyfin password" autocomplete="current-password">
+                <div class="login-remember">
+                    <input type="checkbox" id="jellyfin_remember_me" name="remember_me" value="true">
+                    <label for="jellyfin_remember_me">Remember me for 7 days</label>
+                </div>
+                <button type="submit" class="btn-login">
+                    <i data-lucide="log-in" style="width: 16px; height: 16px;"></i>
+                    Sign In with Jellyfin
+                </button>
+            </form>
+            {% endif %}
         </div>
     </div>
 
@@ -305,6 +365,12 @@
         var _oauthPopup = null;
         var _oauthPopupCheckTimer = null;
         var _plexBtnLabel = {% if password_enabled %}'<img src="/static/img/plex-logo.svg" alt="Plex">'{% else %}'Login with <img src="/static/img/plex-logo.svg" alt="Plex">'{% endif %};
+
+        function showJellyfinForm() {
+            document.getElementById('jellyfin-btn').style.display = 'none';
+            document.getElementById('jellyfin-form').style.display = '';
+            document.getElementById('jellyfin_username').focus();
+        }
 
         function startPlexOAuth() {
             var btn = document.getElementById('plex-oauth-btn');

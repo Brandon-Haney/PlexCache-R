@@ -1,6 +1,7 @@
 """Authentication service for PlexCache-D Web UI.
 
-Provides optional Plex OAuth-based login and password fallback.
+Provides optional login: Plex OAuth (the server owner), Jellyfin
+(administrators of the Jellyfin server), and a password fallback.
 Disabled by default — users enable via Settings > Security.
 """
 
@@ -352,6 +353,79 @@ class AuthService:
         except Exception as e:
             logger.error("Failed to capture admin identity: %s", e)
             return None
+
+    # -------------------------------------------------------------------------
+    # Sign-in methods and Jellyfin sign-in
+    # -------------------------------------------------------------------------
+
+    def login_methods(self) -> Dict[str, bool]:
+        """The sign-ins the login page offers: Plex and Jellyfin when the run uses
+        them (core.config.plex_enabled / jellyfin_configured), and the password."""
+        from core.config import jellyfin_configured, plex_enabled
+        settings = self._load_settings()
+        return {
+            "plex": plex_enabled(settings),
+            "jellyfin": jellyfin_configured(settings),
+            "password": bool(settings.get("auth_password_enabled", False)),
+        }
+
+    def validate_jellyfin_login(self, username: str, password: str) -> Tuple[Optional[Dict[str, str]], str]:
+        """Sign a Jellyfin administrator in through Jellyfin (POST /Users/AuthenticateByName).
+
+        Jellyfin needs a client and device in the Authorization header to sign
+        anyone in, and makes a device entry with an access token for it. The
+        device id is this install's, so signing in again replaces that entry,
+        and the token is logged out at once (POST /Sessions/Logout), so nothing
+        stays behind in Jellyfin's Devices list. Only administrators of the
+        Jellyfin server may sign in, as only the Plex server owner may with Plex.
+
+        Returns:
+            ({"account_id": "jellyfin:<user id>", "username": name}, "") on
+            success, or (None, the reason to show).
+        """
+        from core.config import jellyfin_configured, normalize_jellyfin_url
+        import requests
+        from web.config import PLEXCACHE_PRODUCT_VERSION
+
+        settings = self._load_settings()
+        if not jellyfin_configured(settings):
+            return None, "Jellyfin sign-in isn't set up"
+        url = normalize_jellyfin_url(os.environ.get("JELLYFIN_URL") or settings.get("jellyfin_url", ""))
+        device_id = str(settings.get("plexcache_client_id") or "plexcache-d")
+        client = (f'MediaBrowser Client="PlexCache-D", Device="PlexCache-D", DeviceId="{device_id}", '
+                  f'Version="{PLEXCACHE_PRODUCT_VERSION}"')
+        try:
+            response = requests.post(f"{url}/Users/AuthenticateByName",
+                                     json={"Username": username, "Pw": password},
+                                     headers={"Authorization": client}, timeout=15)
+        except requests.RequestException as e:
+            logger.error("Jellyfin login failed: could not reach Jellyfin: %s", type(e).__name__)
+            return None, "Couldn't reach Jellyfin. Try again, or use another way to sign in."
+        if response.status_code in (400, 401, 403):
+            return None, "Invalid username or password"
+        if response.status_code != 200:
+            logger.error("Jellyfin login failed: HTTP %s", response.status_code)
+            return None, f"Jellyfin couldn't sign you in (HTTP {response.status_code})"
+        try:
+            data = response.json()
+        except ValueError:
+            return None, "Jellyfin sent an answer PlexCache-D can't read"
+
+        token = data.get("AccessToken")
+        if token:
+            try:
+                requests.post(f"{url}/Sessions/Logout", headers={"Authorization": f'{client}, Token="{token}"'},
+                              timeout=10)
+            except requests.RequestException:
+                logger.debug("Jellyfin login: logging the token out failed")
+
+        user = data.get("User") or {}
+        name = user.get("Name") or username
+        if not (user.get("Policy") or {}).get("IsAdministrator"):
+            logger.warning("Jellyfin login rejected: %s is not a Jellyfin administrator", name)
+            return None, "Only Jellyfin administrators can sign in"
+        logger.info("Jellyfin login validated for administrator: %s", name)
+        return {"account_id": f"jellyfin:{user.get('Id', '')}", "username": name}, ""
 
     # -------------------------------------------------------------------------
     # Password authentication

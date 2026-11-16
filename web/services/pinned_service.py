@@ -73,10 +73,12 @@ class PinnedService:
             return True
 
     def _jellyfin_in_use(self) -> bool:
+        """Whether the run uses Jellyfin: the same rule as the config
+        (core.config.jellyfin_configured), so a v3.3.0 install with a Jellyfin
+        URL and key but no jellyfin_enabled key counts too."""
         try:
             from core.config import jellyfin_configured
-            settings = self._settings()
-            return settings.get("jellyfin_enabled") is True and jellyfin_configured(settings)
+            return jellyfin_configured(self._settings())
         except Exception:
             return False
 

@@ -170,7 +170,7 @@ Still to check on a real server (Brandon can run one on Unraid): the whole flow 
 
 - **Plex installs:** Plex sign-in stays as it is.
 - **Without Plex:** the password login already works (`validate_password`, `web/services/auth_service.py:377`).
-- **Phase 3:** Jellyfin sign-in via `POST /Users/AuthenticateByName`, allowed for Jellyfin administrators, with the admin stored as `auth_admin_jellyfin_id`.
+- **Phase 3 (done, `05c2eaa`):** Jellyfin sign-in via `POST /Users/AuthenticateByName`, allowed for any administrator of the Jellyfin server (`Policy.IsAdministrator`), as only the owner may with Plex. No admin id is stored: Jellyfin answers who is an administrator at each sign-in. The request carries the client, device, device id and version Jellyfin requires; the device id is the install's `plexcache_client_id`, so a new sign-in replaces its own device entry, and the token is logged out at once (`POST /Sessions/Logout`) so nothing stays in Jellyfin's Devices list. Settings > Security asks Plex for the owner only when Plex is in use.
 - **API key (#236):** unaffected.
 
 ### 9. Wording
@@ -217,9 +217,10 @@ Still to check on a real server (Brandon can run one on Unraid): the whole flow 
 
 ### Phase 3: Sign-in and wording
 
-- [ ] Jellyfin sign-in.
-- [ ] UI copy.
-- [ ] Community Apps template, README and Unraid guide.
+- [x] Jellyfin sign-in, and login switched on without Plex in Settings > Security and the wizard (`05c2eaa`).
+- [x] UI copy: "media server" where a setting covers both (`2f76cbb`); Plex-only features say so.
+- [x] Community Apps template, README and Unraid guide (`ed00eed`). The template's `<Changes>` waits for the release.
+- [x] `JELLYFIN_PATH_MAPPINGS` (the env var) is folded onto the mappings too, so CA installs see their libraries as on (`eaaf828`).
 
 ### Proposed upstream PRs
 

@@ -302,6 +302,14 @@ class LoggingConfig:
     keep_error_logs_days: int = 7
 
 
+def normalize_jellyfin_url(url: str) -> str:
+    """'192.168.1.10:8096' -> 'http://192.168.1.10:8096', without a trailing slash; '' stays ''."""
+    url = (url or "").strip().rstrip("/")
+    if url and "://" not in url:
+        url = f"http://{url}"
+    return url
+
+
 def jellyfin_configured(settings: Dict[str, Any]) -> bool:
     """Jellyfin has a URL and API key (env vars win, as in _load_jellyfin_config) and isn't switched off."""
     if settings.get('jellyfin_enabled', True) is False:
@@ -580,7 +588,7 @@ class ConfigManager:
     
     def _load_jellyfin_config(self) -> None:
         """Load optional Jellyfin settings. Env vars win so the API key can stay out of the settings file."""
-        self.jellyfin.url = os.environ.get('JELLYFIN_URL') or self.settings_data.get('jellyfin_url', '')
+        self.jellyfin.url = normalize_jellyfin_url(os.environ.get('JELLYFIN_URL') or self.settings_data.get('jellyfin_url', ''))
         self.jellyfin.api_key = os.environ.get('JELLYFIN_API_KEY') or self.settings_data.get('jellyfin_api_key', '')
         self.jellyfin.path_mappings = self._valid_jellyfin_mappings(
             self.settings_data.get('jellyfin_path_mappings', {}) or {}, 'jellyfin_path_mappings')

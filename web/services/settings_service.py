@@ -13,7 +13,7 @@ from web.config import DATA_DIR, SETTINGS_FILE, IS_DOCKER
 from web.api_access import DEFAULT_COOLDOWN_SECONDS, clamp_cooldown
 # Defaults come from core's dataclass rather than repeated literals: the engine
 # reads CacheConfig, so anything hardcoded here can disagree with what runs.
-from core.config import CacheConfig
+from core.config import CacheConfig, jellyfin_configured, normalize_jellyfin_url, plex_enabled
 from core.system_utils import size_setting_error
 from web.dependencies import get_system_detector
 
@@ -307,7 +307,8 @@ class SettingsService:
             "number_episodes": raw.get("number_episodes", 5),
             "users_toggle": raw.get("users_toggle", True),
             "skip_ondeck": raw.get("skip_ondeck", []),
-            "skip_watchlist": raw.get("skip_watchlist", [])
+            "skip_watchlist": raw.get("skip_watchlist", []),
+            "plex_enabled": plex_enabled(raw),
         }
 
     def save_plex_settings(self, settings: Dict[str, Any]) -> bool:
@@ -334,6 +335,8 @@ class SettingsService:
             raw["skip_ondeck"] = settings["skip_ondeck"]
         if "skip_watchlist" in settings:
             raw["skip_watchlist"] = settings["skip_watchlist"]
+        if "plex_enabled" in settings:
+            raw["plex_enabled"] = bool(settings["plex_enabled"])
 
         result = self._save_raw(raw)
 
@@ -342,6 +345,94 @@ class SettingsService:
             self.invalidate_plex_cache()
 
         return result
+
+    # ------------------------------------------------------------------
+    # Jellyfin (core/jellyfin_api.py). The JELLYFIN_URL / JELLYFIN_API_KEY
+    # env vars win over the settings file, as in core.config.
+    # ------------------------------------------------------------------
+
+    def get_jellyfin_settings(self) -> Dict[str, Any]:
+        """Jellyfin connection settings as the run sees them, and which come from env vars."""
+        raw = self._load_raw()
+        url_env, key_env = os.environ.get("JELLYFIN_URL", ""), os.environ.get("JELLYFIN_API_KEY", "")
+        return {
+            "url": url_env or raw.get("jellyfin_url", ""),
+            "api_key": key_env or raw.get("jellyfin_api_key", ""),
+            "url_from_env": bool(url_env),
+            "api_key_from_env": bool(key_env),
+            "switched_on": raw.get("jellyfin_enabled", True) is not False,
+            "configured": jellyfin_configured(raw),
+            "favorites_toggle": bool(raw.get("jellyfin_favorites_toggle", False)),
+        }
+
+    def save_jellyfin_settings(self, settings: Dict[str, Any]) -> bool:
+        """Save the Jellyfin connection. Fields set by env vars are left alone (the env var wins anyway)."""
+        raw = self._load_raw()
+        if "url" in settings and not os.environ.get("JELLYFIN_URL"):
+            raw["jellyfin_url"] = normalize_jellyfin_url(settings["url"])
+        if "api_key" in settings and not os.environ.get("JELLYFIN_API_KEY"):
+            raw["jellyfin_api_key"] = (settings["api_key"] or "").strip()
+        if "enabled" in settings:
+            raw["jellyfin_enabled"] = bool(settings["enabled"])
+        if "favorites_toggle" in settings:
+            raw["jellyfin_favorites_toggle"] = bool(settings["favorites_toggle"])
+        result = self._save_raw(raw)
+        if result:
+            self._jellyfin_cache = {}
+        return result
+
+    def media_servers_after(self, plex: Optional[bool] = None, jellyfin: Optional[bool] = None) -> List[str]:
+        """The media servers a run would use if Plex and/or Jellyfin were switched as given."""
+        raw = dict(self._load_raw())
+        if plex is not None:
+            raw["plex_enabled"] = plex
+        if jellyfin is not None:
+            raw["jellyfin_enabled"] = jellyfin
+        servers = []
+        if plex_enabled(raw) and str(raw.get("PLEX_URL", "")).strip() and str(raw.get("PLEX_TOKEN", "")).strip():
+            servers.append("plex")
+        if jellyfin_configured(raw):
+            servers.append("jellyfin")
+        return servers
+
+    def jellyfin_client(self, url: Optional[str] = None, api_key: Optional[str] = None):
+        """A JellyfinManager for the saved (or given) URL and key, or None without both."""
+        from core.jellyfin_api import JellyfinManager
+        saved = self.get_jellyfin_settings()
+        url = normalize_jellyfin_url(url if url is not None else saved["url"])
+        api_key = (api_key if api_key is not None else saved["api_key"]).strip()
+        if not url or not api_key:
+            return None
+        return JellyfinManager(url, api_key)
+
+    def _jellyfin_cached(self, what: str, fetch) -> Dict[str, Any]:
+        """Libraries or users from Jellyfin, kept for 10 minutes (and a failure for 60s)."""
+        cache = getattr(self, "_jellyfin_cache", None)
+        if cache is None:
+            cache = self._jellyfin_cache = {}
+        entry = cache.get(what)
+        now = datetime.now()
+        if entry and (now - entry["at"]).total_seconds() < (600 if entry["error"] is None else 60):
+            return entry
+        client = self.jellyfin_client()
+        if client is None:
+            entry = {"items": [], "error": "Jellyfin URL or API key is not set", "at": now}
+        else:
+            try:
+                entry = {"items": fetch(client), "error": None, "at": now}
+            except Exception as e:
+                logger.warning(f"Could not read Jellyfin {what}: {type(e).__name__}: {e}")
+                entry = {"items": [], "error": f"Could not reach Jellyfin: {type(e).__name__}", "at": now}
+        cache[what] = entry
+        return entry
+
+    def get_jellyfin_libraries(self) -> Dict[str, Any]:
+        """{"items": [library, ...], "error": str or None} (core.jellyfin_api.JellyfinManager.list_libraries)."""
+        return self._jellyfin_cached("libraries", lambda client: client.list_libraries())
+
+    def get_jellyfin_users(self) -> Dict[str, Any]:
+        """{"items": [user, ...], "error": str or None} (core.jellyfin_api.JellyfinManager.list_users)."""
+        return self._jellyfin_cached("users", lambda client: client.list_users())
 
     def get_path_mappings(self) -> List[Dict[str, Any]]:
         """Get path mappings"""

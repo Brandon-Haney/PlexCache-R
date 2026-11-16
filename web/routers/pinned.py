@@ -36,10 +36,11 @@ def pinned_expand(
     request: Request,
     rating_key: str = Query(...),
     level: str = Query(..., pattern="^(show|season)$"),
+    source: str = Query("plex", pattern="^(plex|jellyfin)$"),
 ):
     """HTMX partial: lazy children for a show (seasons) or season (episodes)."""
     service = get_pinned_service()
-    children = service.expand(rating_key, level)
+    children = service.expand(rating_key, level, source=source)
     return templates.TemplateResponse(
         request,
         "settings/partials/pinned_children.html",
@@ -57,6 +58,7 @@ def pinned_toggle(
     rating_key: str = Form(...),
     pin_type: str = Form(...),
     title: str = Form(""),
+    source: str = Form("plex"),
 ):
     """Toggle a pin. Returns a button partial + inline error on budget overrun.
 
@@ -72,7 +74,7 @@ def pinned_toggle(
     client work.
     """
     service = get_pinned_service()
-    result = service.toggle_pin(rating_key, pin_type, title)
+    result = service.toggle_pin(rating_key, pin_type, title, source=source)
 
     status = 200
     if result.get("error"):
@@ -85,6 +87,7 @@ def pinned_toggle(
             "rating_key": rating_key,
             "pin_type": pin_type,
             "title": title,
+            "source": source,
             "is_pinned": result["is_pinned"],
             "error": result.get("error"),
             "budget": result.get("budget", {}),

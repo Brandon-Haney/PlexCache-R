@@ -32,7 +32,7 @@ from core.plex_api import PlexManager, OnDeckItem
 from core.jellyfin_api import JellyfinManager, jellyfin_path_table
 from core.media_server import JellyfinServer, MediaServer, PlexServer, complete_watchlist_sources
 from core.file_operations import MultiPathModifier, SiblingFileFinder, FileFilter, FileMover, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration, get_media_identity, find_matching_plexcached, is_directory_level_file, is_video_file, save_json_atomically
-from core.pinned_media import PinnedMediaTracker, resolve_pins_to_paths
+from core.pinned_media import PinnedMediaTracker, resolve_jellyfin_pins, resolve_pins_to_paths
 
 
 class PlexCacheApp:
@@ -1442,10 +1442,16 @@ class PlexCacheApp:
         if not pin_entries:
             logging.debug("No pinned media configured")
             return
-        if self.plex_manager is None:
-            # Pins are Plex items until Jellyfin pins exist (media servers phase 2)
-            logging.info(f"[PINNED] {len(pin_entries)} pin(s) not applied: pinned media needs Plex")
-            return
+
+        # Each pin is resolved by the server it was made on (pins without a
+        # source are Plex pins). A server the run doesn't use leaves its pins
+        # in place, unapplied.
+        jellyfin_pins = [p for p in pin_entries if p.get("source") == "jellyfin"]
+        plex_pin_count = sum(1 for p in pin_entries if p.get("source", "plex") == "plex")
+        if plex_pin_count and self.plex_manager is None:
+            logging.info(f"[PINNED] {plex_pin_count} Plex pin(s) not applied: Plex is not in use")
+        if jellyfin_pins and self.jellyfin_manager is None:
+            logging.info(f"[PINNED] {len(jellyfin_pins)} Jellyfin pin(s) not applied: Jellyfin is not in use")
 
         preference = self.config_manager.plex.pinned_preferred_resolution or "highest"
         logging.debug(
@@ -1453,28 +1459,37 @@ class PlexCacheApp:
             f"(preference={preference})..."
         )
 
-        try:
-            resolved, orphaned = resolve_pins_to_paths(
-                self.plex_manager.plex,
-                self.pinned_tracker,
-                preference=preference,
-                # The one caller that prunes. Read-only render paths pass the
-                # default (False) so loading a page can't delete a pin whose
-                # item is only transiently missing from Plex.
-                prune=True,
-            )
-        except Exception as e:
-            logging.error(
-                f"Failed to resolve pinned media: {type(e).__name__}: {e}. "
-                f"Run will continue without pinned media protection."
-            )
-            return
+        resolved: List[Tuple[str, str, str]] = []
+        if self.plex_manager is not None:
+            try:
+                resolved, orphaned = resolve_pins_to_paths(
+                    self.plex_manager.plex,
+                    self.pinned_tracker,
+                    preference=preference,
+                    # The one caller that prunes. Read-only render paths pass the
+                    # default (False) so loading a page can't delete a pin whose
+                    # item is only transiently missing from Plex.
+                    prune=True,
+                )
+            except Exception as e:
+                logging.error(
+                    f"Failed to resolve pinned media: {type(e).__name__}: {e}. "
+                    f"Run will continue without pinned media protection."
+                )
+                return
 
-        if orphaned:
-            logging.info(
-                f"[PINNED] Removed {len(orphaned)} orphaned pin(s) "
-                f"(items no longer in Plex)"
-            )
+            if orphaned:
+                logging.info(
+                    f"[PINNED] Removed {len(orphaned)} orphaned pin(s) "
+                    f"(items no longer in Plex)"
+                )
+
+        if jellyfin_pins and self.jellyfin_manager is not None:
+            # Never prunes: a replaced file gets a new Jellyfin id, so the
+            # pin stays until the user unpins it.
+            jellyfin_resolved, _missing = resolve_jellyfin_pins(
+                self.jellyfin_manager, self.pinned_tracker, preference=preference)
+            resolved = list(resolved) + jellyfin_resolved
 
         if not resolved:
             logging.info("[FETCH] Pinned: 0 files resolved")

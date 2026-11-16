@@ -32,8 +32,9 @@
 {{ pin_button(rating_key, pin_type, title, is_pinned,
               label=('Unpin ' ~ pin_type) if is_pinned else '',
               confirm=('Unpinning this ' ~ pin_type ~ ' releases every episode it covers. Continue?')
-                      if is_pinned else '') }}
+                      if is_pinned else '',
+              source=source or 'plex') }}
 {% else %}
-{{ pin_button(rating_key, pin_type, title, is_pinned) }}
+{{ pin_button(rating_key, pin_type, title, is_pinned, source=source or 'plex') }}
 {% endif %}
 {% endif %}

@@ -118,20 +118,17 @@
            button must unpin the HOLDER — writing a redundant episode pin under a
            show pin double-counts its bytes in budget_check and strands an
            invisible pin when the show is later unpinned. #}
-        {% if row.source != 'plex' %}
-        {{ pin_button(row.rating_key, row.pin_type, row.title, row.is_pinned,
-                      disabled=True,
-                      disabled_reason='Pinning works for Plex items so far. Jellyfin pins are coming.') }}
-        {% elif row.outcome == 'pin_unknown' %}
+        {% if row.outcome == 'pin_unknown' %}
         {{ pin_button(row.rating_key, row.pin_type, row.title, False,
                       disabled=True,
                       disabled_reason='The media server did not answer, so PlexCache cannot tell whether this is pinned. Refresh to retry.') }}
         {% elif row.is_pinned and row.pin_scope in ('show', 'season') %}
         {{ pin_button(row.pin_holder_key, row.pin_scope, row.pin_holder_title, True,
+                      source=row.pin_holder_source,
                       label='Unpin ' ~ row.pin_scope,
                       confirm='This episode is held by a ' ~ row.pin_scope ~ ' pin on "' ~ row.pin_holder_title ~ '". Unpinning releases every episode it covers. Continue?') }}
         {% else %}
-        {{ pin_button(row.rating_key, row.pin_type, row.title, row.is_pinned) }}
+        {{ pin_button(row.rating_key, row.pin_type, row.title, row.is_pinned, source=row.source) }}
         {% endif %}
         {% if row.outcome == 'stays_on_array' %}
         <div class="ra-status-note">copies ~{{ row.size_display }} to cache</div>

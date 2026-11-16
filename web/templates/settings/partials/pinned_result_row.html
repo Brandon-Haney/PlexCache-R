@@ -1,12 +1,12 @@
 {#
   A single search result row. ``item`` is a dict from PinnedService.search():
-  {rating_key, title, type, year, library, size_bytes, size_display, already_pinned}.
+  {rating_key, title, type, year, library, size_bytes, size_display, already_pinned, source}.
 
   The pin/unpin form uses hx-target="this" so only the form (not the row)
   gets swapped when toggled — the title, expand button, and row metadata
   survive the round-trip.
 #}
-<li class="pinned-result-row" data-rating-key="{{ item.rating_key }}" data-type="{{ item.type }}"
+<li class="pinned-result-row" data-rating-key="{{ item.rating_key }}" data-type="{{ item.type }}" data-source="{{ item.source or 'plex' }}"
     style="display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.25rem; border-bottom: 1px solid rgba(255,255,255,0.06);">
     <span class="pinned-result-type-icon" title="{{ item.type | capitalize }}"
           style="display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: var(--plex-radius-sm); background: var(--plex-bg-darker); color: var(--plex-text-secondary); flex-shrink: 0;">
@@ -23,7 +23,7 @@
         {% if item.year %}<span style="color: var(--plex-text-muted); font-size: 0.85rem; margin-left: 0.3rem;">({{ item.year }})</span>{% endif %}
         {% if item.library or item.size_display %}
             <div style="color: var(--plex-text-muted); font-size: 0.75rem; margin-top: 0.15rem;">
-                {%- if item.library %}{{ item.library }}{% endif -%}
+                {%- if item.library %}{{ item.library }}{% if item.source == 'jellyfin' %} (Jellyfin){% endif %}{% endif -%}
                 {%- if item.library and item.size_display %} · {% endif -%}
                 {%- if item.size_display %}{{ item.size_display }}{% endif -%}
             </div>
@@ -44,6 +44,7 @@
         <input type="hidden" name="rating_key" value="{{ item.rating_key }}">
         <input type="hidden" name="pin_type" value="{{ item.type }}">
         <input type="hidden" name="title" value="{{ item.title }}">
+        {% if item.source and item.source != 'plex' %}<input type="hidden" name="source" value="{{ item.source }}">{% endif %}
         <button type="submit" class="btn btn-sm {% if item.already_pinned %}btn-secondary{% else %}btn-primary{% endif %}"
                 title="{% if item.already_pinned %}Unpin — allow this item to be evicted or moved back to the array{% else %}Pin — always keep this item on cache (never evicted){% endif %}">
             <i data-lucide="{% if item.already_pinned %}pin-off{% else %}pin{% endif %}" style="width: 14px; height: 14px; vertical-align: middle;"></i>

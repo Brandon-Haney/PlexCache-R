@@ -64,7 +64,7 @@ class _FakePinnedService:
                 })
         return results[:limit]
 
-    def expand(self, rating_key, level):
+    def expand(self, rating_key, level, source="plex"):
         if level not in ("show", "season"):
             raise ValueError(f"Unknown level: {level}")
         return [
@@ -75,7 +75,7 @@ class _FakePinnedService:
             for c in self.children
         ]
 
-    def toggle_pin(self, rating_key, pin_type, title):
+    def toggle_pin(self, rating_key, pin_type, title, source="plex"):
         if self.toggle_error:
             return {"is_pinned": False, "error": self.toggle_error, "budget": {}}
         if rating_key in self._pins:

@@ -248,10 +248,15 @@ def test_plex_only_is_unchanged(run_service):
     built.assert_not_called()
 
 
-def test_jellyfin_rows_disable_the_pin_button_for_now():
+def test_a_jellyfin_rows_pin_button_sends_its_server():
     from pathlib import Path
     from jinja2 import Environment, FileSystemLoader
     templates = Path(__file__).resolve().parent.parent / "web" / "templates"
-    source = (templates / "recently_added" / "partials" / "list.html").read_text(encoding="utf-8")
-    assert "{% if row.source != 'plex' %}" in source
-    Environment(loader=FileSystemLoader(str(templates))).get_template("recently_added/partials/list.html")
+    macro = Environment(loader=FileSystemLoader(str(templates))).get_template(
+        "macros/pin_button.html").module.pin_button
+    jellyfin = str(macro("c" * 32, "episode", "Pilot", False, source="jellyfin"))
+    assert '<input type="hidden" name="source" value="jellyfin">' in jellyfin
+    # Plex buttons render exactly as before: no source field
+    assert 'name="source"' not in str(macro("101", "movie", "Dune", False))
+    page = (templates / "recently_added" / "partials" / "list.html").read_text(encoding="utf-8")
+    assert "source=row.source" in page and "source=row.pin_holder_source" in page

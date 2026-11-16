@@ -13,7 +13,7 @@
             </li>
         {% endif %}
         {% for child in children %}
-            <li class="pinned-child-row" data-rating-key="{{ child.rating_key }}" data-type="{{ child.type }}"
+            <li class="pinned-child-row" data-rating-key="{{ child.rating_key }}" data-type="{{ child.type }}" data-source="{{ child.source or 'plex' }}"
                 style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0.25rem;">
                 <span class="pinned-child-icon"
                       style="display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; color: var(--plex-text-muted); flex-shrink: 0;">
@@ -50,6 +50,7 @@
                     <input type="hidden" name="rating_key" value="{{ child.rating_key }}">
                     <input type="hidden" name="pin_type" value="{{ child.type }}">
                     <input type="hidden" name="title" value="{{ child.title }}">
+                    {% if child.source and child.source != 'plex' %}<input type="hidden" name="source" value="{{ child.source }}">{% endif %}
                     <button type="submit" class="btn btn-sm {% if child.already_pinned %}btn-secondary{% else %}btn-primary{% endif %}"
                             title="{% if child.already_pinned %}Unpin — allow this item to be evicted or moved back to the array{% else %}Pin — always keep this item on cache (never evicted){% endif %}">
                         <i data-lucide="{% if child.already_pinned %}pin-off{% else %}pin{% endif %}" style="width: 14px; height: 14px; vertical-align: middle;"></i>

@@ -75,6 +75,7 @@ class RecentlyAddedRow:
     pin_scope: str = ""           # "movie" | "show" | "season" | "episode"
     pin_holder_key: str = ""      # rating_key of the holding pin
     pin_holder_title: str = ""
+    pin_holder_source: str = "plex"  # server of the holding pin, sent back if it is re-pinned
     # The show's rating key, for episodes. Grouping keys on this rather than the
     # display title so two same-titled shows in one library stay separate.
     show_rating_key: str = ""
@@ -109,6 +110,7 @@ class RecentlyAddedRow:
             "pin_scope": self.pin_scope,
             "pin_holder_key": self.pin_holder_key,
             "pin_holder_title": self.pin_holder_title,
+            "pin_holder_source": self.pin_holder_source,
             "is_mover_protected": self.is_mover_protected,
             "is_released": self.is_released,
             "source": self.source,
@@ -205,6 +207,7 @@ class RecentlyAddedService:
                 fetched.items,
                 path_modifier,
                 pinned_keys=self._json_keys(self.pinned_file),
+                pin_sources=self._pin_sources(),
                 ondeck_keys=self._json_keys(self.ondeck_file),
                 watchlist_keys=self._json_keys(self.watchlist_file),
                 timestamps_keys=self._json_keys(self.timestamps_file),
@@ -269,7 +272,7 @@ class RecentlyAddedService:
     def _enrich(self, items, path_modifier, pinned_keys, ondeck_keys,
                 watchlist_keys, timestamps_keys,
                 pin_path_map=None, exclude_paths=None, released_paths=None,
-                watched_move=True) -> List[RecentlyAddedRow]:
+                watched_move=True, pin_sources=None) -> List[RecentlyAddedRow]:
         """Enrich fetched items into display rows.
 
         Args:
@@ -282,9 +285,12 @@ class RecentlyAddedService:
             released_paths: Cache paths deliberately handed to the mover.
             watched_move: The ``watched_move`` setting; when off, PlexCache
                 never moves anything back and every cached row says so.
+            pin_sources: ``{pin key: server}`` from pinned_media.json, so an
+                Unpin on a show or season pin re-renders for the right server.
         """
         pin_index_available = pin_path_map is not None
         pin_map = pin_path_map or {}
+        pin_sources = pin_sources or {}
         exclude_paths = exclude_paths if exclude_paths is not None else set()
         released_paths = released_paths if released_paths is not None else set()
 
@@ -393,6 +399,7 @@ class RecentlyAddedService:
                 pin_scope=pin_scope,
                 pin_holder_key=pin_holder_key,
                 pin_holder_title=pin_holder_title,
+                pin_holder_source=pin_sources.get(pin_holder_key) or getattr(item, "source", "plex") or "plex",
                 is_mover_protected=is_mover_protected,
                 is_released=is_released,
                 show_rating_key=getattr(item, "show_rating_key", "") or "",
@@ -729,6 +736,19 @@ class RecentlyAddedService:
             return os.path.exists(path)
         except OSError:
             return False
+
+    def _pin_sources(self) -> Dict[str, str]:
+        """``{pin key: server}`` from pinned_media.json (pins without a source are Plex's)."""
+        try:
+            import json
+            with open(self.pinned_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {str(key): (pin.get("source") or "plex") if isinstance(pin, dict) else "plex"
+                for key, pin in data.items()}
 
     def _json_keys(self, path: Path) -> set:
         """Return the top-level key set of a JSON object file (empty on error)."""

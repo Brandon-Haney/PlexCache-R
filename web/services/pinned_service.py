@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from core.pinned_media import (
     PinnedMediaTracker,
     VALID_PIN_TYPES,
+    resolve_jellyfin_pins,
     resolve_pins_to_paths,
     select_media_version,
     _media_total_size,
@@ -57,8 +58,50 @@ class PinnedService:
     # Plex helpers
     # ------------------------------------------------------------------
 
+    def _settings(self) -> Dict[str, Any]:
+        from web.services import get_settings_service
+        settings = get_settings_service().get_all()
+        return settings if isinstance(settings, dict) else {}
+
+    def _plex_in_use(self) -> bool:
+        """Whether the run uses Plex (core.config.plex_enabled). Pins of a server
+        the run doesn't use are left alone: they resolve to nothing, not to "unknown"."""
+        try:
+            from core.config import plex_enabled
+            return plex_enabled(self._settings())
+        except Exception:
+            return True
+
+    def _jellyfin_in_use(self) -> bool:
+        try:
+            from core.config import jellyfin_configured
+            settings = self._settings()
+            return settings.get("jellyfin_enabled") is True and jellyfin_configured(settings)
+        except Exception:
+            return False
+
+    def _get_jellyfin(self) -> Optional[Any]:
+        """A JellyfinManager with the run's path table, or None if Jellyfin isn't in use."""
+        if not self._jellyfin_in_use():
+            return None
+        try:
+            from core.config import ConfigManager
+            from core.jellyfin_api import jellyfin_manager_from_config
+            from web.config import SETTINGS_FILE
+            config = ConfigManager(str(SETTINGS_FILE))
+            config.load_config(persist_updates=False)
+            return jellyfin_manager_from_config(config) if config.jellyfin.enabled else None
+        except Exception as e:
+            logger.warning(f"PinnedService: could not set up Jellyfin: {e}")
+            return None
+
+    def _pin_sources(self) -> Set[str]:
+        return {p.get("source", "plex") for p in self._tracker.list_pins()}
+
     def _get_plex_server(self) -> Optional[Any]:
-        """Connect to Plex using saved settings. Returns None if unavailable."""
+        """Connect to Plex using saved settings. Returns None if unavailable or Plex is switched off."""
+        if not self._plex_in_use():
+            return None
         from web.services import get_settings_service
         settings_service = get_settings_service()
         plex_settings = settings_service.get_plex_settings()
@@ -95,12 +138,40 @@ class PinnedService:
         if not query:
             return []
 
+        preference = self._get_preference()
+        results = self._search_plex(query, limit, preference) + self._search_jellyfin(query, limit, preference)
+        return results[:limit]
+
+    def _search_jellyfin(self, query: str, limit: int, preference: str) -> List[Dict[str, Any]]:
+        """Jellyfin's movies and shows matching ``query`` (empty if Jellyfin isn't in use or fails)."""
+        jellyfin = self._get_jellyfin()
+        if jellyfin is None:
+            return []
+        from core.system_utils import format_bytes
+        try:
+            hits = jellyfin.search_items(query, limit=limit, preference=preference)
+        except Exception as e:
+            logger.warning(f"PinnedService.search: Jellyfin search failed: {e}")
+            return []
+        return [{
+            "rating_key": hit["id"],
+            "title": hit["title"],
+            "type": hit["type"],
+            "year": hit["year"],
+            "library": hit["library"],
+            "size_bytes": hit["size"],
+            "size_display": format_bytes(hit["size"]) if hit["size"] else "",
+            "already_pinned": self._tracker.is_pinned(hit["id"]),
+            "source": "jellyfin",
+        } for hit in hits]
+
+    def _search_plex(self, query: str, limit: int, preference: str) -> List[Dict[str, Any]]:
+        """Plex's movies and shows matching ``query`` (empty if Plex isn't in use or fails)."""
         plex = self._get_plex_server()
         if plex is None:
             return []
 
         from core.system_utils import format_bytes
-        preference = self._get_preference()
 
         results: List[Dict[str, Any]] = []
         try:
@@ -127,6 +198,7 @@ class PinnedService:
                             "already_pinned": self._tracker.is_pinned(
                                 str(getattr(item, "ratingKey", ""))
                             ),
+                            "source": "plex",
                         })
                     except Exception as e:
                         logger.debug(f"PinnedService.search: skipping malformed hit: {e}")
@@ -145,15 +217,19 @@ class PinnedService:
         """
         return estimate_item_size(item, item_type, preference)
 
-    def expand(self, rating_key: str, level: str) -> List[Dict[str, Any]]:
+    def expand(self, rating_key: str, level: str, source: str = "plex") -> List[Dict[str, Any]]:
         """Return lazy children for a show/season.
 
         Args:
-            rating_key: Plex rating_key of the parent item.
+            rating_key: The parent item's id on its server (Plex rating_key,
+                Jellyfin item id).
             level: ``"show"`` returns seasons; ``"season"`` returns episodes.
+            source: The server the parent came from ("plex" or "jellyfin").
         """
         if level not in ("show", "season"):
             raise ValueError(f"Unknown expand level: {level!r}")
+        if source == "jellyfin":
+            return self._expand_jellyfin(rating_key, level)
 
         plex = self._get_plex_server()
         if plex is None:
@@ -238,6 +314,44 @@ class PinnedService:
 
         return children
 
+    def _expand_jellyfin(self, item_id: str, level: str) -> List[Dict[str, Any]]:
+        """Seasons or episodes of a Jellyfin series or season, shaped like the Plex children."""
+        jellyfin = self._get_jellyfin()
+        if jellyfin is None:
+            return []
+        from core.system_utils import format_bytes
+        try:
+            parent = jellyfin.get_items([item_id]).get(item_id, {})
+            children = jellyfin.pin_children(item_id, level, preference=self._get_preference())
+        except Exception as e:
+            logger.warning(f"PinnedService.expand: Jellyfin children of {item_id} failed: {e}")
+            return []
+        # A season's record names its series; a series is its own title
+        show_title = ((parent.get("SeriesName") or parent.get("Name", "")) if level == "season"
+                      else parent.get("Name", ""))
+        show_year = parent.get("ProductionYear") if level == "show" else None
+        show_label = f"{show_title} ({show_year})" if show_title and show_year else show_title
+        out = []
+        for child in children:
+            if level == "show":
+                title = f"{show_label} — {child['title']}" if show_label and child["title"] else child["title"]
+                extra = {"type": "season", "episode_count": child["episode_count"]}
+            else:
+                se_code = format_season_episode(child["season"], child["index"])
+                title = " — ".join(p for p in (show_label, se_code, child["title"]) if p)
+                extra = {"type": "episode", "index": child["index"], "season_number": child["season"]}
+            out.append({
+                "rating_key": child["id"],
+                "title": title,
+                "parent_rating_key": str(item_id),
+                "size_bytes": child["size"],
+                "size_display": format_bytes(child["size"]) if child["size"] else "",
+                "already_pinned": self._tracker.is_pinned(child["id"]),
+                "source": "jellyfin",
+                **extra,
+            })
+        return out
+
     # ------------------------------------------------------------------
     # Budget preflight
     # ------------------------------------------------------------------
@@ -278,12 +392,23 @@ class PinnedService:
         """
         return sum_pinned_bytes_on_disk(self.resolve_all_to_cache_paths())
 
-    def _estimate_item_bytes(self, rating_key: str, pin_type: str) -> int:
+    def _estimate_item_bytes(self, rating_key: str, pin_type: str, source: str = "plex") -> int:
         """Best-effort size estimate for an item about to be pinned.
 
         Wrapper around :func:`core.pinned_media.estimate_item_bytes` that
-        supplies the web layer's connected Plex instance + preference.
+        supplies the web layer's connected Plex instance + preference. A
+        Jellyfin item is sized from the files its pin would cover.
         """
+        if source == "jellyfin":
+            jellyfin = self._get_jellyfin()
+            if jellyfin is None:
+                return 0
+            try:
+                files = jellyfin.resolve_pin(rating_key, pin_type, self._get_preference()) or []
+            except Exception as e:
+                logger.warning(f"PinnedService: Jellyfin size estimate for {rating_key} failed: {e}")
+                return 0
+            return sum(size for _path, size in files)
         return estimate_item_bytes(
             self._get_plex_server(), rating_key, pin_type, self._get_preference()
         )
@@ -292,6 +417,7 @@ class PinnedService:
         self,
         additional_rating_key: Optional[str] = None,
         additional_pin_type: Optional[str] = None,
+        additional_source: str = "plex",
     ) -> Dict[str, Any]:
         """Compute the pinned-bytes budget state.
 
@@ -310,7 +436,7 @@ class PinnedService:
         additional = 0
         if additional_rating_key:
             additional = self._estimate_item_bytes(
-                additional_rating_key, additional_pin_type or "movie"
+                additional_rating_key, additional_pin_type or "movie", additional_source
             )
 
         return compute_budget_state(
@@ -330,8 +456,12 @@ class PinnedService:
         rating_key: str,
         pin_type: str,
         title: str,
+        source: str = "plex",
     ) -> Dict[str, Any]:
         """Toggle a pin. Adds if missing, removes if present.
+
+        ``source`` is the server the item comes from ("plex" or "jellyfin"); a
+        new pin is stored with it, so it is resolved by that server.
 
         Returns:
             ``{is_pinned: bool, error: Optional[str], budget: dict,
@@ -377,9 +507,16 @@ class PinnedService:
             }
 
         # Budget preflight — hard-block on overrun (PINNED_MEDIA_PLAN.md OQ #2).
+        if source not in ("plex", "jellyfin"):
+            return {
+                "is_pinned": False,
+                "error": f"Unknown media server: {source}",
+                "budget": self.budget_check(),
+            }
         budget = self.budget_check(
             additional_rating_key=rating_key,
             additional_pin_type=pin_type,
+            additional_source=source,
         )
         if budget["would_exceed"]:
             from core.system_utils import format_bytes
@@ -399,7 +536,7 @@ class PinnedService:
         # This tells us which cache paths are NEWLY protected by the new pin
         # (versus already-protected by another existing pin).
         before_paths = self.resolve_all_to_cache_paths()
-        self._tracker.add_pin(rating_key, pin_type, title, added_by="web")
+        self._tracker.add_pin(rating_key, pin_type, title, added_by="web", source=source)
         after_paths = self.resolve_all_to_cache_paths()
         freshly_pinned = sorted(after_paths - before_paths)
         return {
@@ -475,6 +612,19 @@ class PinnedService:
         except Exception as e:
             logger.warning(f"PinnedService.list_pins_with_metadata: resolve failed: {e}")
 
+        # Pins on Jellyfin items: resolved and described by Jellyfin, one request
+        # for all their records
+        jellyfin_info: Dict[str, Dict[str, Any]] = {}
+        jellyfin_keys = [p["rating_key"] for p in pins if p.get("source") == "jellyfin"]
+        jellyfin = self._get_jellyfin() if jellyfin_keys else None
+        if jellyfin is not None:
+            try:
+                resolved_paths = list(resolved_paths) + resolve_jellyfin_pins(
+                    jellyfin, self._tracker, preference)[0]
+                jellyfin_info = jellyfin.get_items(jellyfin_keys)
+            except Exception as e:
+                logger.warning(f"PinnedService.list_pins_with_metadata: Jellyfin resolve failed: {e}")
+
         # Convert plex paths → cache paths via the settings path_mappings,
         # then sum sizes per rating_key.
         from web.services import get_settings_service
@@ -503,11 +653,15 @@ class PinnedService:
         for pin in pins:
             rk = pin["rating_key"]
             size = bytes_by_rk.get(rk, 0)
-            display_title = self._decorate_title(
-                plex, pin["type"], rk, pin["title"]
+            source = pin.get("source", "plex")
+            display_title = (
+                pin["title"] if source == "jellyfin"
+                else self._decorate_title(plex, pin["type"], rk, pin["title"])
             )
             out.append({
                 "rating_key": rk,
+                "source": source,
+                "jellyfin_info": jellyfin_info.get(rk),
                 "type": pin["type"],
                 "title": display_title,
                 "added_at": pin.get("added_at", ""),
@@ -663,6 +817,46 @@ class PinnedService:
 
         return result
 
+    @staticmethod
+    def _jellyfin_group_and_scope(info: Optional[Dict[str, Any]], pin_type: str, key: str,
+                                  stored_title: str) -> Dict[str, Any]:
+        """``_pin_group_and_scope`` for a Jellyfin pin, from Jellyfin's record of the item.
+
+        Episodes and seasons group under their series (SeriesId), as Plex pins
+        group under the show. Without a record (Jellyfin unreachable, or the
+        item gone) the pin stands alone under its stored title.
+        """
+        icons = {"show": "tv", "season": "layers", "episode": "play", "movie": "film"}
+        result = {
+            "group_rating_key": key,
+            "group_title": stored_title,
+            "group_type": "show" if pin_type in ("show", "season", "episode") else "movie",
+            "scope_text": stored_title,
+            "scope_icon": icons.get(pin_type, "file-video"),
+            "sort_key": (0, 0, 0),
+        }
+        if not info:
+            return result
+        name, year = info.get("Name") or stored_title, info.get("ProductionYear")
+        if pin_type in ("movie", "show"):
+            result["group_title"] = f"{name} ({year})" if year else name
+            result["scope_text"] = "Movie" if pin_type == "movie" else "Entire Show"
+            return result
+        result["group_rating_key"] = info.get("SeriesId") or key
+        result["group_title"] = info.get("SeriesName") or stored_title
+        if pin_type == "season":
+            count = info.get("ChildCount")
+            result["scope_text"] = f"{name} ({count} eps)" if isinstance(count, int) and count > 0 else name
+            index = info.get("IndexNumber")
+            result["sort_key"] = (1, index if isinstance(index, int) else 0, 0)
+        else:
+            season, episode = info.get("ParentIndexNumber"), info.get("IndexNumber")
+            se_code = format_season_episode(season, episode)
+            result["scope_text"] = " — ".join(p for p in (se_code, info.get("Name")) if p) or stored_title
+            result["sort_key"] = (2, season if isinstance(season, int) else 0,
+                                  episode if isinstance(episode, int) else 0)
+        return result
+
     def list_pins_grouped(self) -> List[Dict[str, Any]]:
         """Return pins grouped by show/movie, sorted for stable display.
 
@@ -700,9 +894,13 @@ class PinnedService:
         from core.system_utils import format_bytes
         groups: Dict[str, Dict[str, Any]] = {}
         for pin in flat:
-            ctx = self._pin_group_and_scope(
-                plex, pin["type"], pin["rating_key"], pin["title"]
-            )
+            if pin.get("source") == "jellyfin":
+                ctx = self._jellyfin_group_and_scope(
+                    pin.get("jellyfin_info"), pin["type"], pin["rating_key"], pin["title"])
+            else:
+                ctx = self._pin_group_and_scope(
+                    plex, pin["type"], pin["rating_key"], pin["title"]
+                )
             gk = ctx["group_rating_key"]
             if gk not in groups:
                 groups[gk] = {
@@ -772,18 +970,8 @@ class PinnedService:
         if not self._tracker.list_pins():
             return {}
 
-        server = plex if plex is not None else self._get_plex_server()
-        if server is None:
-            return None
-
-        try:
-            resolved, _orphaned = resolve_pins_to_paths(
-                server, self._tracker, self._get_preference()
-            )
-        except Exception as e:
-            logger.warning(
-                f"PinnedService.resolve_all_to_plex_path_map failed: {e}"
-            )
+        resolved = self._resolve_all(plex=plex, label="resolve_all_to_plex_path_map")
+        if resolved is None:
             return None
 
         titles = {
@@ -810,18 +998,8 @@ class PinnedService:
         if not self._tracker.list_pins():
             return {}
 
-        plex = self._get_plex_server()
-        if plex is None:
-            return {}
-
-        try:
-            resolved, _orphaned = resolve_pins_to_paths(
-                plex, self._tracker, self._get_preference()
-            )
-        except Exception as e:
-            logger.warning(
-                f"PinnedService.resolve_all_to_cache_path_map failed: {e}"
-            )
+        resolved = self._resolve_all(label="resolve_all_to_cache_path_map")
+        if resolved is None:
             return {}
 
         from web.services import get_settings_service
@@ -841,6 +1019,9 @@ class PinnedService:
 
         Mirrors ``CacheService._plex_to_real`` + ``_real_to_cache`` as a
         single step. Returns None if no mapping matches.
+
+        A library only Jellyfin has (no plex_path) gives its paths in real
+        form, so those are matched on the mapping's real_path instead.
         """
         for mapping in path_mappings:
             if not mapping.get("enabled", True):
@@ -849,7 +1030,50 @@ class PinnedService:
             cache_prefix = (mapping.get("cache_path") or "").rstrip("/")
             if plex_prefix and cache_prefix and plex_path.startswith(plex_prefix):
                 return cache_prefix + plex_path[len(plex_prefix):]
+        for mapping in path_mappings:
+            if not mapping.get("enabled", True) or (mapping.get("plex_path") or "").strip():
+                continue
+            real_prefix = (mapping.get("real_path") or "").rstrip("/")
+            cache_prefix = (mapping.get("cache_path") or "").rstrip("/")
+            if real_prefix and cache_prefix and (plex_path == real_prefix
+                                                 or plex_path.startswith(real_prefix + "/")):
+                return cache_prefix + plex_path[len(real_prefix):]
         return None
+
+    def _resolve_all(self, plex: Optional[Any] = None,
+                     label: str = "resolve") -> Optional[List[Tuple[str, str, str]]]:
+        """Every pin's files as ``(path, key, pin_type)``, each pin by its own server.
+
+        ``[]`` with no pins. ``None`` when a server the run uses holds pins and
+        can't be reached or fails, which callers show as unknown rather than
+        "not pinned". Pins of a server the run doesn't use resolve to nothing.
+        Never prunes.
+        """
+        sources = self._pin_sources()
+        if not sources:
+            return []
+        preference = self._get_preference()
+        resolved: List[Tuple[str, str, str]] = []
+        if "plex" in sources:
+            server = plex if plex is not None else self._get_plex_server()
+            if server is not None:
+                try:
+                    resolved.extend(resolve_pins_to_paths(server, self._tracker, preference)[0])
+                except Exception as e:
+                    logger.warning(f"PinnedService.{label} failed: {e}")
+                    return None
+            elif self._plex_in_use():
+                return None
+        if "jellyfin" in sources and self._jellyfin_in_use():
+            jellyfin = self._get_jellyfin()
+            if jellyfin is None:
+                return None
+            try:
+                resolved.extend(resolve_jellyfin_pins(jellyfin, self._tracker, preference)[0])
+            except Exception as e:
+                logger.warning(f"PinnedService.{label} (Jellyfin) failed: {e}")
+                return None
+        return resolved
 
     # ------------------------------------------------------------------
     # Direct tracker passthroughs (used by CacheService + routes)

@@ -99,7 +99,12 @@ class PathConfig:
 
 @dataclass
 class PlexConfig:
-    """Configuration for Plex server settings."""
+    """Configuration for Plex server settings.
+
+    Also holds settings that apply to every media server (number_episodes,
+    days_to_monitor), which predate Jellyfin; their keys stay as they are.
+    """
+    enabled: bool = True  # see plex_enabled()
     plex_url: str = ""
     plex_token: str = ""
     valid_sections: Optional[List[int]] = None
@@ -143,10 +148,12 @@ class JellyfinConfig:
     skip_users: List[str] = field(default_factory=list)
     # Unplayed favorites act as a Jellyfin watchlist (needs watchlist_toggle)
     favorites_toggle: bool = False
+    # jellyfin_enabled: false switches Jellyfin off without deleting its settings
+    switched_on: bool = True
 
     @property
     def enabled(self) -> bool:
-        return bool(self.url and self.api_key)
+        return bool(self.switched_on and self.url and self.api_key)
 
 
 @dataclass
@@ -288,6 +295,48 @@ class LoggingConfig:
     # Warnings alone do not trigger preservation — see _preserve_error_log()
     # Logs are preserved in logs/errors/ subfolder
     keep_error_logs_days: int = 7
+
+
+def jellyfin_configured(settings: Dict[str, Any]) -> bool:
+    """Jellyfin has a URL and API key (env vars win, as in _load_jellyfin_config) and isn't switched off."""
+    if settings.get('jellyfin_enabled', True) is False:
+        return False
+    url = os.environ.get('JELLYFIN_URL') or settings.get('jellyfin_url', '')
+    api_key = os.environ.get('JELLYFIN_API_KEY') or settings.get('jellyfin_api_key', '')
+    return bool(str(url).strip() and str(api_key).strip())
+
+
+def _has_plex_server(settings: Dict[str, Any]) -> bool:
+    return bool(str(settings.get('PLEX_URL', '')).strip() or str(settings.get('PLEX_TOKEN', '')).strip())
+
+
+def plex_enabled(settings: Dict[str, Any]) -> bool:
+    """Whether the run uses Plex.
+
+    plex_enabled in the settings decides when it is there. Without it (every
+    settings file from before Jellyfin-only support), Plex is used unless the
+    file has no Plex URL or token and Jellyfin is switched on, so an existing
+    install validates and runs exactly as before.
+    """
+    flag = settings.get('plex_enabled')
+    if flag is not None:
+        return flag is not False
+    return _has_plex_server(settings) or not (
+        settings.get('jellyfin_enabled') is True and jellyfin_configured(settings))
+
+
+def setup_has_media_server(settings: Dict[str, Any]) -> bool:
+    """Setup counts as done once a media server is saved.
+
+    A Plex URL and token (unless Plex is switched off), or Jellyfin switched on
+    with jellyfin_enabled and its URL and API key. Jellyfin needs the explicit
+    switch: its env vars can be filled in on a brand-new container, and must
+    not skip the setup wizard on their own.
+    """
+    plex_saved = (bool(str(settings.get('PLEX_URL', '')).strip() and str(settings.get('PLEX_TOKEN', '')).strip())
+                  and settings.get('plex_enabled', True) is not False)
+    jellyfin_saved = settings.get('jellyfin_enabled') is True and jellyfin_configured(settings)
+    return plex_saved or jellyfin_saved
 
 
 def _derive_migrated_cache_path(real_source: str, cache_dir: str) -> str:
@@ -479,12 +528,14 @@ class ConfigManager:
     
     def _load_plex_config(self) -> None:
         """Load Plex-related configuration."""
-        self.plex.plex_url = self.settings_data['PLEX_URL']
-        self.plex.plex_token = self.settings_data['PLEX_TOKEN']
+        self.plex.enabled = plex_enabled(self.settings_data)
+        # Validation requires the Plex fields when Plex is used; without Plex they may be absent
+        self.plex.plex_url = self.settings_data.get('PLEX_URL', '')
+        self.plex.plex_token = self.settings_data.get('PLEX_TOKEN', '')
         self.plex.number_episodes = self.settings_data['number_episodes']
-        self.plex.valid_sections = self.settings_data['valid_sections']
+        self.plex.valid_sections = self.settings_data.get('valid_sections', [])
         self.plex.days_to_monitor = self.settings_data['days_to_monitor']
-        self.plex.users_toggle = self.settings_data['users_toggle']
+        self.plex.users_toggle = self.settings_data.get('users_toggle', True)
         self.plex.plex_db_path = self.settings_data.get('plex_db_path', '')
         self.plex.pinned_preferred_resolution = self.settings_data.get(
             'pinned_preferred_resolution', 'highest'
@@ -542,6 +593,7 @@ class ConfigManager:
                 else:
                     logging.error(f"JELLYFIN_PATH_MAPPINGS must be a JSON object, got {type(parsed).__name__}")
         self.jellyfin.favorites_toggle = bool(self.settings_data.get('jellyfin_favorites_toggle', False))
+        self.jellyfin.switched_on = self.settings_data.get('jellyfin_enabled', True) is not False
         env_favorites = os.environ.get('JELLYFIN_FAVORITES_TOGGLE')
         if env_favorites:
             self.jellyfin.favorites_toggle = env_favorites.strip().lower() in ('1', 'true', 'yes', 'on')
@@ -864,11 +916,18 @@ class ConfigManager:
 
         # Core required fields (always required)
         required_fields = [
-            'PLEX_URL', 'PLEX_TOKEN', 'number_episodes', 'valid_sections',
-            'days_to_monitor', 'users_toggle', 'watchlist_toggle',
+            'number_episodes', 'days_to_monitor', 'watchlist_toggle',
             'watchlist_episodes', 'watched_move', 'cache_dir',
             'max_concurrent_moves_array', 'max_concurrent_moves_cache'
         ]
+        # Plex settings, only when the run uses Plex
+        if plex_enabled(self.settings_data):
+            required_fields[:0] = ['PLEX_URL', 'PLEX_TOKEN', 'valid_sections', 'users_toggle']
+        elif not jellyfin_configured(self.settings_data):
+            message = ("No media server is set up: Plex is switched off (plex_enabled) and Jellyfin has no "
+                       "URL and API key, or is switched off (jellyfin_enabled)")
+            logging.error(message)
+            raise ValueError(message)
 
         # Legacy path fields (only required if path_mappings not configured)
         if not has_path_mappings:
@@ -960,11 +1019,12 @@ class ConfigManager:
             if value < 0:
                 errors.append(f"'{field}' must be non-negative, got {value}")
 
-        # Validate non-empty URL and token
-        if not self.settings_data.get('PLEX_URL', '').strip():
-            errors.append("'PLEX_URL' cannot be empty")
-        if not self.settings_data.get('PLEX_TOKEN', '').strip():
-            errors.append("'PLEX_TOKEN' cannot be empty")
+        # Validate non-empty URL and token (only when the run uses Plex)
+        if self.plex.enabled:
+            if not self.settings_data.get('PLEX_URL', '').strip():
+                errors.append("'PLEX_URL' cannot be empty")
+            if not self.settings_data.get('PLEX_TOKEN', '').strip():
+                errors.append("'PLEX_TOKEN' cannot be empty")
 
         if errors:
             error_msg = "Configuration validation errors: " + "; ".join(errors)

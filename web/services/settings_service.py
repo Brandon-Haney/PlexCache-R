@@ -61,6 +61,8 @@ KNOWN_SETTINGS_KEYS = frozenset({
     # Jellyfin as an additional OnDeck and watchlist source
     "jellyfin_url", "jellyfin_api_key", "jellyfin_path_mappings", "jellyfin_skip_users",
     "jellyfin_favorites_toggle",
+    # Which media servers a run uses (core.config.plex_enabled / jellyfin_configured)
+    "plex_enabled", "jellyfin_enabled",
     # Legacy keys (migrated or ignored on load)
     "sonarr_enabled", "sonarr_url", "sonarr_api_key",
     "radarr_enabled", "radarr_url", "radarr_api_key",

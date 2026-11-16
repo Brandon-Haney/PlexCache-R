@@ -576,7 +576,11 @@ class PlexCacheApp:
         return servers
 
     def _init_plex_manager(self) -> None:
-        """Initialize the Plex manager with token cache."""
+        """Initialize the Plex manager with token cache, when the run uses Plex."""
+        if not self.config_manager.plex.enabled:
+            logging.info("[PLEX] Not used: Plex is switched off or not set up")
+            self.plex_manager = None
+            return
         logging.debug("Initializing Plex manager...")
         token_cache_file = str(self.config_manager.get_user_tokens_file())
         rss_cache_file = str(self.config_manager.get_rss_cache_file())
@@ -598,7 +602,10 @@ class PlexCacheApp:
             return
         if not jellyfin.path_mappings:
             logging.warning("[JELLYFIN] jellyfin_path_mappings is empty — no Jellyfin item will match a library")
-        logging.info(f"[JELLYFIN] Additional OnDeck source enabled: {jellyfin.url}")
+        if self.config_manager.plex.enabled:
+            logging.info(f"[JELLYFIN] Additional OnDeck source enabled: {jellyfin.url}")
+        else:
+            logging.info(f"[JELLYFIN] Media server: {jellyfin.url} (Plex not used)")
         if jellyfin.favorites_toggle and not self.config_manager.cache.watchlist_toggle:
             logging.warning("[JELLYFIN] jellyfin_favorites_toggle needs watchlist_toggle — favorites are not cached")
         self.jellyfin_manager = JellyfinManager(
@@ -1032,7 +1039,9 @@ class PlexCacheApp:
         )
 
     def _connect_to_plex(self) -> None:
-        """Connect to the Plex server and load user tokens."""
+        """Connect to the Plex server and load user tokens (nothing to do when Plex isn't used)."""
+        if self.plex_manager is None:
+            return
         self.plex_manager.connect()
 
         # Load user tokens once at startup (reduces plex.tv API calls)
@@ -1424,6 +1433,10 @@ class PlexCacheApp:
         pin_entries = self.pinned_tracker.list_pins()
         if not pin_entries:
             logging.debug("No pinned media configured")
+            return
+        if self.plex_manager is None:
+            # Pins are Plex items until Jellyfin pins exist (media servers phase 2)
+            logging.info(f"[PINNED] {len(pin_entries)} pin(s) not applied: pinned media needs Plex")
             return
 
         preference = self.config_manager.plex.pinned_preferred_resolution or "highest"

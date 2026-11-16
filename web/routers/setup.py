@@ -51,15 +51,9 @@ def clear_setup_state() -> None:
 
 
 def is_setup_complete() -> bool:
-    """Check if initial setup has been completed"""
-    settings_service = get_settings_service()
-    settings = settings_service.get_all()
-
-    # Setup is complete if we have Plex URL and token configured
-    plex_url = settings.get("PLEX_URL", "")
-    plex_token = settings.get("PLEX_TOKEN", "")
-
-    return bool(plex_url and plex_token)
+    """Check if initial setup has been completed: a media server is saved (core.config.setup_has_media_server)"""
+    from core.config import setup_has_media_server
+    return setup_has_media_server(get_settings_service().get_all())
 
 
 def get_or_create_client_id(settings: Dict) -> str:

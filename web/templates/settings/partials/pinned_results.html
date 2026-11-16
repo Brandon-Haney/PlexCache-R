@@ -10,7 +10,7 @@
                 No results for "{{ query }}"
             {% else %}
                 <i data-lucide="search" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 0.25rem;"></i>
-                Type to search Plex for movies and shows to pin.
+                Type to search for movies and shows to pin.
             {% endif %}
         </p>
     {% else %}
@@ -40,7 +40,10 @@
         btn.querySelector('[data-lucide]').style.transform = 'rotate(180deg)';
         btn.classList.add('active');
         label.textContent = 'Collapse';
-        htmx.ajax('GET', '/api/pinned/expand?rating_key=' + ratingKey + '&level=' + level, {
+        // The row says which server the item is on; its children are on the same one
+        var source = parent.getAttribute('data-source') || 'plex';
+        htmx.ajax('GET', '/api/pinned/expand?rating_key=' + encodeURIComponent(ratingKey) + '&level=' + level
+                  + '&source=' + encodeURIComponent(source), {
             target: parent,
             swap: 'afterend'
         });

@@ -187,14 +187,15 @@ def test_plex_client_built_with_plex(monkeypatch):
     assert app.plex_manager is built.return_value
 
 
-def test_pins_wait_for_plex(caplog):
+def test_plex_pins_wait_for_plex(caplog):
     app = _app(plex_on=False)
     app.plex_manager = None
+    app.jellyfin_manager = None
     app.pinned_tracker = MagicMock()
     app.pinned_tracker.list_pins.return_value = [{"rating_key": "1", "type": "movie", "title": "Film"}]
     with caplog.at_level(logging.INFO):
         app._process_pinned_media({})
-    assert "1 pin(s) not applied: pinned media needs Plex" in caplog.text
+    assert "1 Plex pin(s) not applied: Plex is not in use" in caplog.text
     assert app.pinned_items == set()
 
 

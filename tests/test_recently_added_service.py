@@ -566,10 +566,12 @@ class TestScanDirectoryMemo:
         module-level singleton shared across requests."""
         svc = _service(on_disk={"/mnt/cache/movies/Movie.mkv"})
         seen = []
-        svc._scan_associated_files = lambda p, c=None: (seen.append(id(c)), [])[1]
+        # Keep the dicts themselves: comparing id()s of objects that don't
+        # coexist fails whenever CPython reuses the first one's address.
+        svc._scan_associated_files = lambda p, c=None: (seen.append(c), [])[1]
         _enrich(svc, [_item()])
         _enrich(svc, [_item()])
-        assert len(seen) == 2 and seen[0] != seen[1]
+        assert len(seen) == 2 and seen[0] is not seen[1]
 
 
 class TestGetRecentlyAddedEndToEnd:

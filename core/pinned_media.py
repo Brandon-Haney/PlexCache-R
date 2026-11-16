@@ -387,6 +387,58 @@ def resolve_pins_to_paths(
     return resolved, orphaned
 
 
+def resolve_jellyfin_pins(
+    jellyfin: Any,
+    tracker: "PinnedMediaTracker",
+    preference: str = "highest",
+) -> Tuple[List[Tuple[str, str, str]], List[str]]:
+    """Resolve the pins made on Jellyfin items (``source: "jellyfin"``) to file paths.
+
+    The Jellyfin counterpart of ``resolve_pins_to_paths``, with the same
+    ``(resolved, missing)`` shape; paths are in the form the run uses
+    (``JellyfinManager.to_plex_path``). It never removes a pin: Jellyfin gives a
+    movie or episode a new id when its file is replaced by one with a new name,
+    so an id that has gone missing is reported, and the user pins the new file.
+
+    Args:
+        jellyfin: A ``core.jellyfin_api.JellyfinManager``.
+        tracker: The ``PinnedMediaTracker`` instance.
+        preference: Value from ``pinned_preferred_resolution``.
+    """
+    resolved: List[Tuple[str, str, str]] = []
+    missing: List[str] = []
+    for pin in tracker.list_pins():
+        if pin.get("source") != "jellyfin":
+            continue
+        key, pin_type = pin["rating_key"], pin["type"]
+        title = pin.get("title", key)
+        try:
+            files = jellyfin.resolve_pin(key, pin_type, preference)
+        except Exception as e:
+            logging.error(
+                f"Failed to resolve pinned {pin_type} '{title}' from Jellyfin: "
+                f"{type(e).__name__}: {e}. Leaving pin in place."
+            )
+            continue
+        if files is None:
+            logging.warning(
+                f"Pinned {pin_type} '{title}' is no longer in Jellyfin. If its file was "
+                f"replaced, pin the new one; this pin stays until you unpin it."
+            )
+            missing.append(key)
+            continue
+        if not files:
+            logging.warning(f"Pinned {pin_type} '{title}' (Jellyfin) resolved to 0 files")
+            continue
+        for path, _size in files:
+            resolved.append((path, key, pin_type))
+        logging.info(
+            f"Pinned {pin_type} '{title}' (Jellyfin): resolved to {len(files)} file(s) "
+            f"per preferred_resolution={preference}"
+        )
+    return resolved, missing
+
+
 class PinnedMediaTracker(JSONTracker):
     """Tracks user-pinned media items keyed by Plex rating_key.
 

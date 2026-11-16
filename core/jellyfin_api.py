@@ -307,23 +307,32 @@ class JellyfinManager:
         items.sort(key=lambda i: i.added_at or datetime.min, reverse=True)
         return RecentlyAddedResult(items=items[:max_items], unreadable_libraries=unreadable)
 
-    def _recently_added_item(self, item: Dict[str, Any], library: Dict[str, Any], added_at: Optional[datetime],
-                             version_preference: str) -> Optional[RecentlyAddedItem]:
+    def _versions(self, item: Dict[str, Any], preference: str) -> List[Dict[str, Any]]:
+        """Every mapped file of an item: [{file_path, size, is_preferred, label}].
+
+        is_preferred marks the one version chosen by the rule pins use
+        (core.pinned_media.select_media_version, pinned_preferred_resolution).
+        file_path is in the form the run uses (to_plex_path).
+        """
         from core.pinned_media import select_media_version
         sources = [s for s in item.get('MediaSources') or [] if s.get('Path')]
         if not sources and item.get('Path'):
             sources = [{'Path': item['Path']}]
         if not sources:
-            return None
+            return []
         medias = [_source_as_media(source) for source in sources]
-        preferred = select_media_version(SimpleNamespace(media=medias, title=item.get('Name', '')),
-                                         version_preference)
-        version_files = []
+        preferred = select_media_version(SimpleNamespace(media=medias, title=item.get('Name', '')), preference)
+        versions = []
         for media in medias:
             path = self.to_plex_path(media.parts[0].file)
             if path:
-                version_files.append({'file_path': path, 'size': media.parts[0].size,
-                                      'is_preferred': media is preferred, 'label': _version_label(media)})
+                versions.append({'file_path': path, 'size': media.parts[0].size,
+                                 'is_preferred': media is preferred, 'label': _version_label(media)})
+        return versions
+
+    def _recently_added_item(self, item: Dict[str, Any], library: Dict[str, Any], added_at: Optional[datetime],
+                             version_preference: str) -> Optional[RecentlyAddedItem]:
+        version_files = self._versions(item, version_preference)
         preferred_files = [f for f in version_files if f['is_preferred']]
         if not preferred_files:
             return None
@@ -347,6 +356,88 @@ class JellyfinManager:
             version_files=version_files,
             source='jellyfin',
         )
+
+    # --- Pins -----------------------------------------------------------------
+    # A pin on a Jellyfin item is stored under the item's id with source
+    # "jellyfin" (core.pinned_media.PinnedMediaTracker). Jellyfin derives an
+    # item's id from its path, so a movie or episode replaced by a file with a
+    # new name gets a new id; show and season ids follow their folders.
+
+    def search_items(self, query: str, limit: int = 25, preference: str = "highest") -> List[Dict[str, Any]]:
+        """Movies and series matching ``query`` in the mapped libraries, for the pin picker.
+
+        [{id, title, type ('movie' | 'show'), year, library, size}]; size is the
+        chosen version of a movie, and 0 for a series (its seasons show theirs).
+        """
+        libraries = [lib for lib in self.list_libraries() if self._library_is_mapped(lib['locations'])]
+        found = self._get('/Items', searchTerm=query, recursive='true', includeItemTypes='Movie,Series',
+                          fields=f"{ITEM_FIELDS},ProductionYear", limit=limit).get('Items', [])
+        results = []
+        for item in found:
+            path = item.get('Path') or ''
+            library = next((lib for lib in libraries if any(
+                path == folder or path.startswith(folder + '/')
+                for folder in (_normalize_prefix(loc) for loc in lib['locations']))), None)
+            if not item.get('Id') or library is None:
+                continue  # in a library PlexCache-D doesn't use
+            is_show = item.get('Type') == 'Series'
+            size = 0 if is_show else sum(v['size'] for v in self._versions(item, preference) if v['is_preferred'])
+            results.append({'id': item['Id'], 'title': item.get('Name', ''), 'type': 'show' if is_show else 'movie',
+                            'year': item.get('ProductionYear'), 'library': library['title'], 'size': size})
+        return results
+
+    def pin_children(self, item_id: str, level: str, preference: str = "highest") -> List[Dict[str, Any]]:
+        """Seasons of a series (level "show") or episodes of a season (level "season"), for the pin picker.
+
+        Seasons: [{id, title, index, episode_count, size}]; episodes: [{id, title,
+        season, index, size}]. Sizes are the chosen versions, from one request.
+        """
+        episodes = self._get('/Items', parentId=item_id, recursive='true', includeItemTypes='Episode',
+                             isMissing='false', sortBy='ParentIndexNumber,IndexNumber',
+                             fields=ITEM_FIELDS).get('Items', [])
+        sizes: Dict[Any, int] = {}
+        for episode in episodes:
+            size = sum(v['size'] for v in self._versions(episode, preference) if v['is_preferred'])
+            sizes[episode.get('Id')] = size
+            sizes[('season', episode.get('SeasonId'))] = sizes.get(('season', episode.get('SeasonId')), 0) + size
+        if level == 'season':
+            return [{'id': e['Id'], 'title': e.get('Name', ''), 'season': e.get('ParentIndexNumber'),
+                     'index': e.get('IndexNumber'), 'size': sizes.get(e['Id'], 0)} for e in episodes if e.get('Id')]
+        seasons = self._get('/Items', parentId=item_id, includeItemTypes='Season', sortBy='IndexNumber',
+                            fields='ChildCount').get('Items', [])
+        counts: Dict[Any, int] = {}
+        for episode in episodes:
+            counts[episode.get('SeasonId')] = counts.get(episode.get('SeasonId'), 0) + 1
+        return [{'id': s['Id'], 'title': s.get('Name', ''), 'index': s.get('IndexNumber'),
+                 'episode_count': counts.get(s['Id']) or s.get('ChildCount'),
+                 'size': sizes.get(('season', s['Id']), 0)} for s in seasons if s.get('Id')]
+
+    def get_items(self, ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Jellyfin's records for these ids, by id; an id Jellyfin doesn't know is left out."""
+        if not ids:
+            return {}
+        found = self._get('/Items', ids=','.join(ids), fields='ProductionYear,ChildCount').get('Items', [])
+        return {item['Id']: item for item in found if item.get('Id')}
+
+    def resolve_pin(self, item_id: str, pin_type: str, preference: str = "highest") -> Optional[List[Tuple[str, int]]]:
+        """Files a pin covers: [(path the run uses, size)], one version per item.
+
+        None when Jellyfin has no item with this id (deleted, or replaced by a
+        file with a new name). A show or season covers its episodes.
+        """
+        if pin_type in ('movie', 'episode'):
+            items = self._get('/Items', ids=item_id, fields=ITEM_FIELDS).get('Items', [])
+            if not items:
+                return None
+        else:
+            if not self._get('/Items', ids=item_id).get('Items', []):
+                return None
+            items = self._get('/Items', parentId=item_id, recursive='true', includeItemTypes='Episode',
+                              isMissing='false', fields=ITEM_FIELDS).get('Items', [])
+        files = []
+        for item in items:
+            files.extend((v['file_path'], v['size']) for v in self._versions(item, preference) if v['is_preferred'])
+        return files
 
     def _users_to_fetch(self, purpose: str) -> Optional[List[Dict[str, Any]]]:
         """Enabled users minus jellyfin_skip_users. None if the user list can't be read."""

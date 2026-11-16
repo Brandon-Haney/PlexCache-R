@@ -3,10 +3,12 @@
   (Settings pin picker, Cached Files row, future Dashboard widget).
 
   Parameters:
-    rating_key  — Plex rating key (required)
+    rating_key  — the item's id on its server: Plex rating key, Jellyfin item id (required)
     pin_type    — "episode", "season", "show", or "movie" (required)
     title       — display title, passed through to /api/pinned/toggle (required)
     is_pinned   — current state; controls icon + variant + label
+    source      — the server the item comes from ("plex" default, or "jellyfin");
+                  a new pin is stored with it so that server resolves it
 
   Wire contract:
     POST /api/pinned/toggle returns web/templates/settings/partials/pinned_toggle_response.html,
@@ -17,7 +19,7 @@
 
   See PINNED_MEDIA_PLAN.md → Phase 4 discovery #6 for the rationale behind this shape.
 #}
-{% macro pin_button(rating_key, pin_type, title, is_pinned, label='', confirm='', disabled=False, disabled_reason='') %}
+{% macro pin_button(rating_key, pin_type, title, is_pinned, label='', confirm='', disabled=False, disabled_reason='', source='plex') %}
 {#
   Optional params (all default to reproducing the original output byte-for-byte):
     label           — override the button text, e.g. "Unpin show"
@@ -44,6 +46,7 @@
     <input type="hidden" name="rating_key" value="{{ rating_key }}">
     <input type="hidden" name="pin_type" value="{{ pin_type }}">
     <input type="hidden" name="title" value="{{ title }}">
+    {% if source and source != 'plex' %}<input type="hidden" name="source" value="{{ source }}">{% endif %}
     <button type="submit" class="btn btn-sm {% if is_pinned %}btn-secondary{% else %}btn-primary{% endif %}"
             title="{% if is_pinned %}Unpin — allow this item to be evicted or moved back to the array{% else %}Pin — always keep this item on cache (never evicted){% endif %}">
         <i data-lucide="{% if is_pinned %}pin-off{% else %}pin{% endif %}" style="width: 14px; height: 14px; vertical-align: middle;"></i>

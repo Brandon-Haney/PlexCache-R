@@ -468,11 +468,11 @@ _INDEX: List[Dict[str, Any]] = [
     },
     {
         "tab": "cache", "setting_id": "pinned_search",
-        "label": "Search Plex (Pin Media)",
+        "label": "Search Libraries (Pin Media)",
         "hint": "Pick a movie, show, season, or episode to pin to the cache.",
         "section": "Cache", "subsection": "Pinned Media",
         "icon": "search", "tone": "tone-purple",
-        "keywords": ["pin", "pinned", "search", "plex", "media", "force cache"],
+        "keywords": ["pin", "pinned", "search", "plex", "jellyfin", "media", "force cache"],
     },
 
     # --- Schedule ----------------------------------------------------------

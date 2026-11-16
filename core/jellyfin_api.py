@@ -360,8 +360,16 @@ class JellyfinManager:
     # --- Pins -----------------------------------------------------------------
     # A pin on a Jellyfin item is stored under the item's id with source
     # "jellyfin" (core.pinned_media.PinnedMediaTracker). Jellyfin derives an
-    # item's id from its path, so a movie or episode replaced by a file with a
-    # new name gets a new id; show and season ids follow their folders.
+    # item's id from its type and path (LibraryManager.GetNewItemId: MD5 of
+    # both), so a movie or episode replaced by a file with a new name gets a
+    # new id; show and season ids follow their folders.
+    #
+    # These requests carry no userId: with an API key Jellyfin then reads every
+    # library (ItemsController.GetItems, 10.9+). Without a user, /Items with a
+    # season as parentId only finds episodes inside a season folder, so seasons
+    # and episodes come from the TV endpoints, which also cover episodes that
+    # sit directly in the series folder (Season.GetEpisodes ->
+    # Series.GetSeasonEpisodes).
 
     def search_items(self, query: str, limit: int = 25, preference: str = "highest") -> List[Dict[str, Any]]:
         """Movies and series matching ``query`` in the mapped libraries, for the pin picker.
@@ -370,8 +378,9 @@ class JellyfinManager:
         chosen version of a movie, and 0 for a series (its seasons show theirs).
         """
         libraries = [lib for lib in self.list_libraries() if self._library_is_mapped(lib['locations'])]
+        # ProductionYear is always in the reply (it is not an ItemFields value)
         found = self._get('/Items', searchTerm=query, recursive='true', includeItemTypes='Movie,Series',
-                          fields=f"{ITEM_FIELDS},ProductionYear", limit=limit).get('Items', [])
+                          fields=ITEM_FIELDS, limit=limit).get('Items', [])
         results = []
         for item in found:
             path = item.get('Path') or ''
@@ -392,9 +401,7 @@ class JellyfinManager:
         Seasons: [{id, title, index, episode_count, size}]; episodes: [{id, title,
         season, index, size}]. Sizes are the chosen versions, from one request.
         """
-        episodes = self._get('/Items', parentId=item_id, recursive='true', includeItemTypes='Episode',
-                             isMissing='false', sortBy='ParentIndexNumber,IndexNumber',
-                             fields=ITEM_FIELDS).get('Items', [])
+        episodes = self._episodes(item_id, level)
         sizes: Dict[Any, int] = {}
         for episode in episodes:
             size = sum(v['size'] for v in self._versions(episode, preference) if v['is_preferred'])
@@ -403,8 +410,7 @@ class JellyfinManager:
         if level == 'season':
             return [{'id': e['Id'], 'title': e.get('Name', ''), 'season': e.get('ParentIndexNumber'),
                      'index': e.get('IndexNumber'), 'size': sizes.get(e['Id'], 0)} for e in episodes if e.get('Id')]
-        seasons = self._get('/Items', parentId=item_id, includeItemTypes='Season', sortBy='IndexNumber',
-                            fields='ChildCount').get('Items', [])
+        seasons = self._get(f'/Shows/{item_id}/Seasons', isMissing='false', fields='ChildCount').get('Items', [])
         counts: Dict[Any, int] = {}
         for episode in episodes:
             counts[episode.get('SeasonId')] = counts.get(episode.get('SeasonId'), 0) + 1
@@ -412,11 +418,23 @@ class JellyfinManager:
                  'episode_count': counts.get(s['Id']) or s.get('ChildCount'),
                  'size': sizes.get(('season', s['Id']), 0)} for s in seasons if s.get('Id')]
 
+    def _episodes(self, item_id: str, level: str, record: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Episodes of a series (level "show") or of a season (level "season"), in order."""
+        if level == 'show':
+            return self._get(f'/Shows/{item_id}/Episodes', isMissing='false',
+                             fields=ITEM_FIELDS).get('Items', [])
+        record = record or self.get_items([item_id]).get(item_id) or {}
+        series_id = record.get('SeriesId') or record.get('ParentId')
+        if not series_id:
+            return []
+        return self._get(f'/Shows/{series_id}/Episodes', seasonId=item_id, isMissing='false',
+                         fields=ITEM_FIELDS).get('Items', [])
+
     def get_items(self, ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """Jellyfin's records for these ids, by id; an id Jellyfin doesn't know is left out."""
         if not ids:
             return {}
-        found = self._get('/Items', ids=','.join(ids), fields='ProductionYear,ChildCount').get('Items', [])
+        found = self._get('/Items', ids=','.join(ids), fields='ChildCount').get('Items', [])
         return {item['Id']: item for item in found if item.get('Id')}
 
     def resolve_pin(self, item_id: str, pin_type: str, preference: str = "highest") -> Optional[List[Tuple[str, int]]]:
@@ -430,10 +448,10 @@ class JellyfinManager:
             if not items:
                 return None
         else:
-            if not self._get('/Items', ids=item_id).get('Items', []):
+            found = self._get('/Items', ids=item_id).get('Items', [])
+            if not found:
                 return None
-            items = self._get('/Items', parentId=item_id, recursive='true', includeItemTypes='Episode',
-                              isMissing='false', fields=ITEM_FIELDS).get('Items', [])
+            items = self._episodes(item_id, pin_type, found[0])
         files = []
         for item in items:
             files.extend((v['file_path'], v['size']) for v in self._versions(item, preference) if v['is_preferred'])

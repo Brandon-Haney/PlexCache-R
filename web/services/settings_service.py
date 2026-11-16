@@ -515,10 +515,73 @@ class SettingsService:
                 mapping["enabled"] = True
         return self._save_raw(raw)
 
+    def fold_jellyfin_path_mappings(self, raw: Dict[str, Any]) -> bool:
+        """Move jellyfin_path_mappings (Jellyfin prefix -> Plex prefix) onto the path mappings they cover.
+
+        Each mapping whose plex_path is under an entry's Plex prefix, and has no
+        Jellyfin path yet, gets jellyfin_path = Jellyfin prefix + the rest, the
+        same translation the run did. An entry that covered a mapping is removed;
+        one that covered none is kept, and still applies in the run. Running it
+        again changes nothing. Returns whether raw changed.
+        """
+        legacy = raw.get("jellyfin_path_mappings")
+        if not isinstance(legacy, dict) or not legacy:
+            return False
+        remaining = {}
+        changed = False
+        for jellyfin_prefix, plex_prefix in legacy.items():
+            jellyfin_root, plex_root = self._folder(jellyfin_prefix), self._folder(plex_prefix)
+            took = False
+            for mapping in raw.get("path_mappings", []):
+                plex_path = self._folder(mapping.get("plex_path"))
+                if not plex_path or mapping.get("jellyfin_path"):
+                    continue
+                if plex_path == plex_root or plex_path.startswith(plex_root + "/"):
+                    mapping["jellyfin_path"] = jellyfin_root + plex_path[len(plex_root):]
+                    took = changed = True
+            if not took:
+                remaining[jellyfin_prefix] = plex_prefix
+        if changed:
+            self._backup_settings(raw, "before-jellyfin-paths")
+            raw["jellyfin_path_mappings"] = remaining
+            logger.info("Moved jellyfin_path_mappings onto the path mappings they cover")
+        return changed
+
+    def _backup_settings(self, raw: Dict[str, Any], label: str) -> None:
+        """Keep a copy of the settings file in the data folder before a migration rewrites it."""
+        try:
+            from core.file_operations import save_json_atomically
+            backup = DATA_DIR / f"plexcache_settings.{label}.json"
+            if not backup.exists():
+                save_json_atomically(str(backup), self._load_raw(), label="settings backup")
+        except Exception as e:
+            logger.warning(f"Could not back up settings before {label}: {e}")
+
+    def _link_jellyfin_library_ids(self, raw: Dict[str, Any], libraries: List[Dict[str, Any]]) -> bool:
+        """Give mappings with a Jellyfin path but no library its Jellyfin library, by folder."""
+        changed = False
+        for library in libraries:
+            folders = {self._folder(location) for location in library.get("locations", [])}
+            for mapping in raw.get("path_mappings", []):
+                if not mapping.get("jellyfin_library_id") and self._folder(mapping.get("jellyfin_path")) in folders:
+                    mapping["jellyfin_library_id"] = library["id"]
+                    changed = True
+        return changed
+
     def jellyfin_library_cards(self) -> Dict[str, Any]:
-        """Cards for Settings > Libraries: each Jellyfin library with the mappings it uses."""
+        """Cards for Settings > Libraries: each Jellyfin library with the mappings it uses.
+
+        First moves any older jellyfin_path_mappings onto the mappings and links
+        mappings to their Jellyfin library, so an install set up before the
+        Libraries screen shows its libraries as on.
+        """
         fetched = self.get_jellyfin_libraries()
-        mappings = self._load_raw().get("path_mappings", [])
+        raw = self._load_raw()
+        folded = self.fold_jellyfin_path_mappings(raw)
+        linked_ids = self._link_jellyfin_library_ids(raw, fetched["items"])
+        if folded or linked_ids:
+            self._save_raw(raw)
+        mappings = raw.get("path_mappings", [])
         cards = []
         for library in fetched["items"]:
             linked = []

@@ -193,6 +193,41 @@ def test_users_page_shows_the_servers_in_use(make_client):
     assert 'hx-put="/settings/users"' not in page and 'hx-get="/settings/users/jellyfin"' in page
 
 
+def test_older_jellyfin_path_mappings_move_onto_the_mappings(make_client, tmp_path):
+    """An install set up with jellyfin_path_mappings shows its libraries as on, once."""
+    client, svc = make_client([MOVIES_PLEX, {**TV_PLEX_OFF, "plex_path": "/data/tv/shows/", "enabled": True}])
+    raw = svc._load_raw()
+    raw["jellyfin_path_mappings"] = {"/media/movies/": "/data/movies", "/media/tv": "/data/tv/",
+                                     "/media/music": "/data/music/"}
+    svc._save_raw(raw)
+
+    page = client.get("/settings/libraries/jellyfin").text
+    raw = svc._load_raw()
+    movies, tv = raw["path_mappings"]
+    assert movies["jellyfin_path"] == "/media/movies" and movies["jellyfin_library_id"] == "lib-movies"
+    assert tv["jellyfin_path"] == "/media/tv/shows"  # nested under the Plex prefix
+    assert raw["jellyfin_path_mappings"] == {"/media/music": "/data/music/"}  # covered nothing: kept
+    assert 'id="jellyfin-library-card-lib-movies"' in page
+    assert (tmp_path / "plexcache_settings.before-jellyfin-paths.json").exists()
+
+    client.get("/settings/libraries/jellyfin")
+    assert svc._load_raw()["path_mappings"] == raw["path_mappings"]  # again: nothing changes
+
+
+def test_switching_off_beats_the_older_setting():
+    """The same folder in jellyfin_path_mappings must not keep a switched-off library mapped."""
+    from core.app import PlexCacheApp
+    from core.config import JellyfinConfig, PathMapping
+    app = object.__new__(PlexCacheApp)
+    app.config_manager = MagicMock()
+    app.config_manager.jellyfin = JellyfinConfig(url="http://jf", api_key="k",
+                                                 path_mappings={"/media/movies/": "/data/movies/"})
+    app.config_manager.paths.path_mappings = [
+        PathMapping(name="Movies", plex_path="/data/movies/", real_path="/mnt/user/movies/",
+                    jellyfin_path="/media/movies", jellyfin_enabled=False)]
+    assert app._jellyfin_paths() == ({}, ["/media/movies"])
+
+
 def test_the_run_skips_a_switched_off_jellyfin_library():
     from core.app import PlexCacheApp
     from core.config import JellyfinConfig, PathMapping

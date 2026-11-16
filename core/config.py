@@ -789,7 +789,10 @@ class ConfigManager:
             host_cache_path = self._add_trailing_slashes(mapping_data['host_cache_path']) if mapping_data.get('host_cache_path') else None
             mapping = PathMapping(
                 name=mapping_data.get('name', 'Unnamed'),
-                plex_path=self._add_trailing_slashes(mapping_data.get('plex_path', '')),
+                # A library only Jellyfin has has no Plex path. Keep it empty:
+                # "/" would match every path.
+                plex_path=(self._add_trailing_slashes(mapping_data['plex_path'])
+                           if (mapping_data.get('plex_path') or '').strip() else ''),
                 real_path=self._add_trailing_slashes(mapping_data.get('real_path', '')),
                 cache_path=cache_path,
                 host_cache_path=host_cache_path,
@@ -1070,6 +1073,31 @@ class ConfigManager:
 
         logging.debug("Value validation successful")
     
+    @staticmethod
+    def _path_mapping_to_dict(mapping: PathMapping) -> Dict[str, Any]:
+        """A path mapping as stored in the settings file.
+
+        The Jellyfin fields are written only for mappings Jellyfin uses, so a
+        Plex-only settings file is rewritten exactly as before.
+        """
+        data = {
+            'name': mapping.name,
+            'plex_path': mapping.plex_path,
+            'real_path': mapping.real_path,
+            'cache_path': mapping.cache_path,
+            'host_cache_path': mapping.host_cache_path,
+            'cacheable': mapping.cacheable,
+            'enabled': mapping.enabled,
+            'section_id': mapping.section_id,
+        }
+        if mapping.jellyfin_path or mapping.jellyfin_library_id:
+            data.update({
+                'jellyfin_path': mapping.jellyfin_path,
+                'jellyfin_library_id': mapping.jellyfin_library_id,
+                'jellyfin_enabled': mapping.jellyfin_enabled,
+            })
+        return data
+
     def _save_updated_config(self) -> None:
         """Save updated configuration back to file."""
         try:
@@ -1098,17 +1126,7 @@ class ConfigManager:
             # Save path_mappings if present
             if self.paths.path_mappings:
                 self.settings_data['path_mappings'] = [
-                    {
-                        'name': m.name,
-                        'plex_path': m.plex_path,
-                        'real_path': m.real_path,
-                        'cache_path': m.cache_path,
-                        'host_cache_path': m.host_cache_path,
-                        'cacheable': m.cacheable,
-                        'enabled': m.enabled,
-                        'section_id': m.section_id
-                    }
-                    for m in self.paths.path_mappings
+                    self._path_mapping_to_dict(m) for m in self.paths.path_mappings
                 ]
 
             with open(self.config_file, 'w', encoding='utf-8') as f:

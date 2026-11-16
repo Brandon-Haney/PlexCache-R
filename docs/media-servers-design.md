@@ -141,16 +141,21 @@ Today a `PathMapping` (`core/config.py:44-72`) has one `plex_path`. Jellyfin pat
 
 ### 7. Web features (phase 2)
 
-| Feature | Plex today | Jellyfin |
+| Feature | Plex | Jellyfin |
 |---|---|---|
-| Recently Added | `get_recently_added_media` (`core/plex_api.py:1754-1940`) | `/Items/Latest` per user, or `/Items` sorted by `DateCreated` |
-| Pins | `plex.search`, `fetchItem` (`web/services/pinned_service.py`) | `/Items?searchTerm=`, `/Items?ids=` with `MediaSources` for the version choice |
-| Upgrade check | `fetchItem(rating_key)`, compare the file (`web/services/cache_service.py:2007-2190`) | `/Items?ids=`, compare `Path` |
-| Duplicate scan | `library.sections()` (`web/services/duplicate_service.py:205-310`) | `/Items?Recursive=true&Fields=Path,MediaSources` per library |
-| Dashboard status | "Plex Connected" | a status chip per server |
+| Recently Added | `get_recently_added_media` (`core/plex_api.py`) | Done: `JellyfinManager.get_recently_added_media`, `/Items` per mapped movie or TV library sorted by `DateCreated` |
+| Pins | `plex.search`, `fetchItem` (`web/services/pinned_service.py`) | Done: `/Items?searchTerm=`, `/Items?parentId=`, `/Items?ids=` with `MediaSources` for the version choice |
+| Upgrade check | `fetchItem(rating_key)`, compare the file (`web/services/cache_service.py`) | Open (question 5). Skipped when Plex is off |
+| Duplicate scan | `library.sections()` (`web/services/duplicate_service.py`) | Open (question 6). The card says it needs Plex |
+| Dashboard status | "Plex Connected" | Done: a badge per server in use |
 | Source badges | done in #234 | done in #234 |
 
-Until phase 2, when Plex isn't enabled these pages say they need Plex instead of failing or looking empty. Jellyfin endpoints and fields are to be confirmed against the Jellyfin 10.9+ API, the minimum version since #234.
+How the done ones behave:
+
+- **Recently Added:** each server in use is asked, Plex first. A file both report is one row (Jellyfin paths are translated to the same form), Jellyfin's libraries are marked "(Jellyfin)" when both are in use, and a server that fails is named while the other's items still show. One version per item, by `pinned_preferred_resolution`: Jellyfin's `MediaSources` are adapted to `select_media_version`.
+- **Pins:** a pin on a Jellyfin item is keyed by its Jellyfin id with `source: "jellyfin"`, and resolved by Jellyfin (movie or episode to its chosen version, show or season to its episodes). It is **never pruned**: Jellyfin derives a movie's or episode's id from its file path, so a file replaced by one with a new name gets a new id, and the old pin is logged as missing until the user unpins it. Show and season ids follow their folders and survive upgrades. A server the run doesn't use leaves its pins in place, unapplied; a server in use that can't be reached reads as unknown, never as "not pinned".
+
+Jellyfin endpoints and fields are checked against a fake Jellyfin in the tests, and still need a check against a real Jellyfin 10.9+ server, the minimum version since #234. In particular `/Items` without `userId` (Recently Added, pin search) relies on the admin API key.
 
 ### 8. Sign-in
 
@@ -177,23 +182,30 @@ Until phase 2, when Plex isn't enabled these pages say they need Plex instead of
 - [x] Pins: never pruned for an ID the server can't read; pins of another server are skipped by the Plex resolver (`8ed7ef6`). Ship this early, on its own.
 - [x] `core/media_server.py`: shared types and the `MediaServer` interface; Plex and Jellyfin adapters with no behaviour change, checked by a differential run against the previous commit (`fadc88d`).
 - [x] `PlexCacheApp` loops over the servers for sessions, OnDeck, the watchlist and the move-back checks (`fadc88d`).
-- [ ] Still open from the interface: the shared next-episode helper (`core/jellyfin_api.py` still imports `core.plex_api` for it); connecting through the interface; the one-server-down rule (open question 2).
+- [x] The shared next-episode helper moved into `core/media_server.py`, so `core/jellyfin_api.py` no longer imports `core.plex_api` (`192664e`).
+- [ ] Still open from the interface: connecting through the interface; the one-server-down rule (open question 2).
 - [x] Config: `plex_enabled` / `jellyfin_enabled`, at least one server, Plex-only fields required only for Plex, and setup completeness (`setup_has_media_server`); without Plex the run builds no Plex client and leaves pins alone (`b549a3a`).
 - [x] Path mappings: `jellyfin_path` and `jellyfin_library_id`, Jellyfin paths to the mapping's Plex or real path (`babe0cd`).
-- [ ] Migration of `jellyfin_path_mappings` into the mappings, with the Libraries screen.
-- [ ] Jellyfin library list (`/Library/VirtualFolders`) and library toggles.
-- [ ] Setup wizard steps 2 to 4 for Jellyfin, plus Settings: the Media Servers tab, Libraries and Users grouped by server, and settings search entries.
-- [ ] "Needs Plex" states for Recently Added, pins, the duplicate scan and the upgrade check.
+- [x] Migration of `jellyfin_path_mappings` into the mappings, run when the Libraries tab loads the Jellyfin cards: backs up the settings first, removes only entries that covered a mapping, and changes nothing a second time (`b08ffd7`).
+- [x] Jellyfin library list (`/Library/VirtualFolders`) and library toggles (`c821f8f`).
+- [x] Setup wizard: "Use Jellyfin" on step 2, Jellyfin's libraries and users on steps 3 and 4, password login without Plex, and `/setup/complete` no longer saves the wizard's `_` keys (`4d64522`). Settings: the Media Servers tab (`8fa030c`), Libraries (`c821f8f`) and Users (`f659b4c`) grouped by server, with search entries.
+- [x] "Needs Plex" states: the duplicate scan, and the upgrade check skipped with Plex off (`6df19d9`). Recently Added and pins support Jellyfin instead (phase 2).
+- [x] Settings rewrite: every run rewrote `path_mappings` without the Jellyfin fields and turned an empty `plex_path` into `"/"`, which matches every path. Fixed with round-trip tests through `load_config()` (`2b85b9c`).
 - [ ] Tests:
-  - a Jellyfin-only run end to end against a fake Jellyfin
-  - Plex-only runs unchanged on fixture settings
-  - both servers together
-  - one server down
-  - every migration on real settings files
+  - [x] the wizard's Jellyfin-only settings load and validate (`tests/test_setup_jellyfin.py`)
+  - [x] a run applies Jellyfin pins without Plex, and both servers' pins together (`tests/test_jellyfin_pins.py`)
+  - [x] Plex-only rewrites of the settings file unchanged (`tests/test_jellyfin_path_mappings.py`)
+  - [ ] a whole Jellyfin-only run against a fake Jellyfin as a checked-in test (done so far with the scratch differential harness)
+  - [ ] one server down
+  - [ ] every migration on real settings files
 
 ### Phase 2: Jellyfin in the web features
 
-- [ ] Recently Added, pins (search, versions, budget), the upgrade check, the duplicate scan, and dashboard status per server.
+- [x] Dashboard status per server, kept current after a server change (`dc0c553`, `8b32fd9`).
+- [x] Recently Added (`ad97012`).
+- [x] Pins: search, expand, versions, budget, the run, Recently Added and Cached Files (`f41362e`).
+- [ ] The upgrade check (open question 5).
+- [ ] The duplicate scan (open question 6).
 
 ### Phase 3: Sign-in and wording
 
@@ -217,6 +229,8 @@ Phase 1 is too big for one review. Proposed split, each PR passing alone and lea
 2. **One server down.** Cache from the other and skip move-back (proposed), or stop the run as today?
 3. **Jellyfin library filter.** By mapping (proposed), or by library ID on each item (`ParentId` / ancestors)?
 4. **Emby.** It shares Jellyfin's API ancestry. Out of scope unless someone asks.
+5. **Jellyfin upgrade check.** Plex keeps an item's rating key when Sonarr or Radarr swaps its file; Jellyfin gives a movie or episode a new id. Proposed: record what survives a swap on Jellyfin's tracker entries (the series id with season and episode numbers for an episode, the folder for a movie) and look the new file up by that. Needs checking against a real Jellyfin first.
+6. **Jellyfin duplicate scan.** Jellyfin groups versions only when the files follow its naming ("Movie - 1080p.mkv"); other copies show up as separate items. Scan `MediaSources` for grouped versions only, or also match separate items by provider id? The scan offers to delete files, so it should not guess.
 
 ## Reference
 

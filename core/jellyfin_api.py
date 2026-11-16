@@ -46,12 +46,18 @@ class JellyfinManager:
     """Fetches OnDeck-equivalent media from a Jellyfin server via an admin API key."""
 
     def __init__(self, url: str, api_key: str, path_mappings: Optional[Dict[str, str]] = None,
-                 skip_users: Optional[List[str]] = None, session: Optional[Any] = None):
+                 skip_users: Optional[List[str]] = None, session: Optional[Any] = None,
+                 skip_prefixes: Optional[List[str]] = None):
+        """path_mappings: Jellyfin path prefix -> the path the run uses for those files
+        (a Plex path, or a real path for a library only Jellyfin has).
+        skip_prefixes: Jellyfin folders of disabled libraries, skipped without the
+        "unmapped path" notice."""
         self.url = url.rstrip('/')
         # Longest prefix first, so nested mappings win
         self.path_mappings = sorted(
             ((_normalize_prefix(j), _normalize_prefix(p)) for j, p in (path_mappings or {}).items()),
             key=lambda kv: len(kv[0]), reverse=True)
+        self.skip_prefixes = [_normalize_prefix(p) for p in (skip_prefixes or []) if _normalize_prefix(p)]
         self.skip_users = set(skip_users or [])
         self.session = session or requests.Session()
         self.session.headers['Authorization'] = f'MediaBrowser Client="PlexCache-D", Token="{api_key}"'
@@ -71,7 +77,8 @@ class JellyfinManager:
         return response.json()
 
     def to_plex_path(self, path: str) -> Optional[str]:
-        """Translate a Jellyfin path into the Plex path space. None if no mapping matches."""
+        """Translate a Jellyfin path into the path the run uses (a Plex path, or a real
+        path for a Jellyfin-only library). None if no mapping matches."""
         for jellyfin_prefix, plex_prefix in self.path_mappings:
             # Match whole folders only, so /media does not also match /media2
             if path == jellyfin_prefix or path.startswith(jellyfin_prefix + '/'):
@@ -88,9 +95,14 @@ class JellyfinManager:
             plex_path = self.to_plex_path(path)
             if plex_path:
                 result.append(plex_path)
+            elif self._in_skipped_library(path):
+                logging.debug(f"[JELLYFIN] {path} is in a disabled library, skipping")
             else:
                 self._report_unmapped(path)
         return result
+
+    def _in_skipped_library(self, path: str) -> bool:
+        return any(path == prefix or path.startswith(prefix + '/') for prefix in self.skip_prefixes)
 
     def _report_unmapped(self, path: str) -> None:
         """Log an unmapped path at INFO once per library folder, so a wrong mapping is visible."""
@@ -98,7 +110,8 @@ class JellyfinManager:
         hint = _library_hint(path)
         if hint not in self._reported_unmapped:
             self._reported_unmapped.add(hint)
-            logging.info(f"[JELLYFIN] Skipping unmapped path {hint} - add it to jellyfin_path_mappings")
+            logging.info(f"[JELLYFIN] Skipping unmapped path {hint} - set it as the Jellyfin path "
+                         f"of a path mapping (jellyfin_path), or add it to jellyfin_path_mappings")
 
     def get_on_deck_media(self, days_to_monitor: int, number_episodes: int,
                           prefetch_minimum_minutes: int = 0) -> List[OnDeckItem]:

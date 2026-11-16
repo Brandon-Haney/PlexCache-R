@@ -821,7 +821,7 @@ async def update_library_paths(request: Request, section_id: int):
         effective_host_cache_path = host_cache_path if host_cache_path else cache_path
         existing = all_mappings[idx]
 
-        all_mappings[idx] = settings_service._sanitize_path_mapping({
+        all_mappings[idx] = settings_service._sanitize_path_mapping(settings_service.keep_unedited_mapping_fields(existing, {
             "name": name,
             "plex_path": plex_path,
             "real_path": real_path,
@@ -831,7 +831,7 @@ async def update_library_paths(request: Request, section_id: int):
             "enabled": True,
             "section_id": existing.get("section_id"),
             # Clear auto_fill flag — user has reviewed paths
-        })
+        }))
 
     # Remove deleted mappings (highest index first so earlier indices stay valid).
     for idx in sorted(indices_to_delete, reverse=True):

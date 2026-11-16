@@ -595,13 +595,35 @@ class PlexCacheApp:
             watchlist_enabled=self.config_manager.cache.watchlist_toggle
         )
 
+    def _jellyfin_paths(self) -> Tuple[Dict[str, str], List[str]]:
+        """Where Jellyfin's paths go, and the Jellyfin folders of disabled libraries.
+
+        A path mapping's jellyfin_path maps to that mapping's plex_path, so a file
+        both servers report keeps one tracker entry as before, or to its real_path
+        for a library only Jellyfin has (the run passes real paths through
+        unchanged). The older jellyfin_path_mappings (Jellyfin prefix -> Plex
+        prefix) still apply; a mapping's own jellyfin_path wins for the same prefix.
+        """
+        table = dict(self.config_manager.jellyfin.path_mappings)
+        skipped = []
+        for mapping in self.config_manager.paths.path_mappings:
+            if not mapping.jellyfin_path:
+                continue
+            if mapping.enabled:
+                table[mapping.jellyfin_path] = mapping.plex_path or mapping.real_path
+            else:
+                skipped.append(mapping.jellyfin_path)
+        return table, skipped
+
     def _init_jellyfin_manager(self) -> None:
         """Initialize the optional Jellyfin OnDeck source."""
         jellyfin = self.config_manager.jellyfin
         if not jellyfin.enabled:
             return
-        if not jellyfin.path_mappings:
-            logging.warning("[JELLYFIN] jellyfin_path_mappings is empty — no Jellyfin item will match a library")
+        path_table, skipped_folders = self._jellyfin_paths()
+        if not path_table:
+            logging.warning("[JELLYFIN] No Jellyfin paths are mapped (jellyfin_path on a path mapping, "
+                            "or jellyfin_path_mappings), so no Jellyfin item will match a library")
         if self.config_manager.plex.enabled:
             logging.info(f"[JELLYFIN] Additional OnDeck source enabled: {jellyfin.url}")
         else:
@@ -611,8 +633,9 @@ class PlexCacheApp:
         self.jellyfin_manager = JellyfinManager(
             url=jellyfin.url,
             api_key=jellyfin.api_key,
-            path_mappings=jellyfin.path_mappings,
+            path_mappings=path_table,
             skip_users=jellyfin.skip_users,
+            skip_prefixes=skipped_folders,
         )
 
     def _init_path_modifier(self) -> None:

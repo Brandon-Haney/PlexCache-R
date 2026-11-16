@@ -233,10 +233,22 @@ class SettingsService:
             return None
         return path.strip()
 
+    # Mapping fields the mapping editors don't show yet: an edit keeps them
+    # (the Plex library a mapping belongs to, Jellyfin's path and library)
+    KEPT_MAPPING_FIELDS = ("section_id", "jellyfin_path", "jellyfin_library_id")
+
+    @classmethod
+    def keep_unedited_mapping_fields(cls, existing: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
+        """Carry KEPT_MAPPING_FIELDS over from the stored mapping when the edit doesn't set them."""
+        for key in cls.KEPT_MAPPING_FIELDS:
+            if key not in mapping and key in existing:
+                mapping[key] = existing[key]
+        return mapping
+
     def _sanitize_path_mapping(self, mapping: Dict[str, Any]) -> Dict[str, Any]:
         """Sanitize all path fields in a path mapping"""
         sanitized = mapping.copy()
-        path_fields = ["plex_path", "real_path", "cache_path", "host_cache_path"]
+        path_fields = ["plex_path", "real_path", "cache_path", "host_cache_path", "jellyfin_path"]
         for field in path_fields:
             if field in sanitized and sanitized[field]:
                 sanitized[field] = self._sanitize_path(sanitized[field])
@@ -355,15 +367,13 @@ class SettingsService:
     def update_path_mapping(self, index: int, mapping: Dict[str, Any]) -> bool:
         """Update an existing path mapping by index (sanitizes paths to strip whitespace).
 
-        Preserves section_id from the existing mapping if not in the update dict.
+        Keeps the fields the editors don't show (KEPT_MAPPING_FIELDS: section_id,
+        jellyfin_path, jellyfin_library_id) from the existing mapping if not in the update dict.
         """
         raw = self._load_raw()
         mappings = raw.get("path_mappings", [])
         if 0 <= index < len(mappings):
-            # Preserve section_id from existing mapping if not provided
-            existing = mappings[index]
-            if "section_id" not in mapping and "section_id" in existing:
-                mapping["section_id"] = existing["section_id"]
+            self.keep_unedited_mapping_fields(mappings[index], mapping)
             mappings[index] = self._sanitize_path_mapping(mapping)
             raw["path_mappings"] = mappings
             return self._save_raw(raw)

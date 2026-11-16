@@ -37,11 +37,12 @@ def test_the_api_key_is_masked():
     assert _jellyfin_fields()["JELLYFIN_API_KEY"].get("Mask") == "true"
 
 
-def test_jellyfin_is_described_as_alongside_plex():
+def test_plex_jellyfin_or_both_is_described():
     overview = TEMPLATE.find("Overview").text
     requires = TEMPLATE.find("Requires").text
-    assert "Plex Media Server must be accessible" in requires
-    assert "alongside Plex" in overview and "alongside Plex" in requires
+    assert "Plex Media Server or Jellyfin 10.9+ (or both) must be accessible" in requires
+    assert "Plex, Jellyfin or both" in overview
+    assert "alongside Plex" not in overview + requires  # Jellyfin no longer needs Plex
     assert "jellyfin" in TEMPLATE.find("ExtraSearchTerms").text.split()
 
 

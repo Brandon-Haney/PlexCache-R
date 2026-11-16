@@ -46,7 +46,7 @@ The original PlexCache app only worked for local users for most features, due to
 - (New v3.2) - **Extension-Free Caching** - Cache ALL sibling files (artwork, NFOs, metadata) alongside videos, not just subtitles. Eliminates array spinups caused by Plex reading poster.jpg, .nfo, or other small files.
 - (New v3.2) - **Reference-Counted Directory Files** - Shared files like `poster.jpg` stay cached until the last video in the directory is evicted.
 - (New v3.2) - **Sidecar File Indicators** - Dashboard shows sidecar file counts alongside subtitle counts in the cache browser.
-- (New v3.3) - **Jellyfin (Optional)** - Add Jellyfin 10.9+ alongside Plex, so Jellyfin users' Continue Watching, Next Up and favorites are cached too. See [Jellyfin](#jellyfin-optional).
+- **Jellyfin** - Use Plex, Jellyfin 10.9+, or both. Jellyfin users' Continue Watching, Next Up and favorites are cached like Plex's On Deck and Watchlist. (v3.3 added Jellyfin alongside Plex.) See [Jellyfin](#jellyfin).
 - (New v3.3) - **Recently Added** - A page and dashboard widget showing new media, whether it is on the cache or the array, and pins to keep it on the cache.
 - (New v3.3) - **Release to Mover** - Watched files that were never backed up as `.plexcached` are handed back to the Unraid mover instead of being copied to the array.
 - (New v3.3) - **API Access** - An API key so Tautulli or Home Assistant can start or stop a run, even with the Web UI login on.
@@ -329,27 +329,33 @@ python3 plexcache.py
 
 For additional help, check the [Wiki](https://github.com/StudioNirin/PlexCache-D/wiki) for detailed guides. If something doesn't make sense or doesn't work, please open a new issue. But don't be upset if the answer is in the Wiki and we mock you for not reading it thoroughly first.
 
-## Jellyfin (optional)
+## Jellyfin
 
-Jellyfin can be added as a second OnDeck source next to Plex, for setups where both servers share the same media. Every enabled Jellyfin user's *Continue Watching* and *Next Up* (plus the next `number_episodes` episodes) are cached like Plex OnDeck items, and files playing on Jellyfin are skipped. There is no Jellyfin watchlist. Plex stays required. Needs **Jellyfin 10.9 or newer** (older servers lack `/UserItems/Resume`, so every run would count as incomplete and nothing would move back to the array).
+PlexCache-D works with Plex, **Jellyfin 10.9 or newer**, or both. Pick the server in the setup wizard ("Use Jellyfin" on the Plex step), or add Jellyfin later under **Settings → Media Servers**. Jellyfin needs its URL and an API key (Jellyfin Dashboard → API Keys). Older Jellyfin servers lack `/UserItems/Resume`, so every run would count as incomplete and nothing would move back to the array.
 
-Enabled when URL and API key are set (Jellyfin Dashboard → API Keys). Env vars override the settings file:
+**What is cached.** Every enabled Jellyfin user's *Continue Watching* and *Next Up* (plus the next `number_episodes` episodes), like Plex On Deck items, and files playing on Jellyfin are skipped. Jellyfin has no watchlist: with favorites on (Settings → Media Servers, or `jellyfin_favorites_toggle`) and the watchlist on, unplayed favorites stand in for it: favorite movies, and the first `watchlist_episodes` unplayed episodes of favorite series (specials skipped). They follow the watchlist rules, including `watchlist_retention_days`, counted from the first run that sees the favorite since Jellyfin doesn't record when it was set.
+
+**Libraries.** Settings → Libraries lists Jellyfin's libraries next to Plex's. Switching one on links each of its folders to a path mapping: a folder Plex also has shares that library's mapping, so a file both servers report keeps one entry, and a library only Jellyfin has gets a mapping of its own. Setups from before this used `jellyfin_path_mappings` (or `JELLYFIN_PATH_MAPPINGS`) to translate Jellyfin paths into Plex paths. Those keep working, and opening the Libraries tab moves them onto the path mappings they cover, after backing up the settings file into the data folder.
+
+**Users.** Settings → Users lists Jellyfin's users; switch off anyone whose items shouldn't be cached (`jellyfin_skip_users`). All other enabled users are fetched, regardless of `users_toggle` (that setting only applies to Plex).
+
+**Pins, Recently Added and the dashboard** cover both servers. A pin on a Jellyfin movie or episode follows its Jellyfin id, and Jellyfin gives a file a new id when it is replaced by one with a new name (a Sonarr or Radarr upgrade), so pin the new file then; the old pin is logged as missing and stays until you remove it. Show and season pins survive upgrades. The duplicate scan and the upgrade check in Maintenance still read Plex only.
+
+**Login.** With Require Login on, administrators of the Jellyfin server sign in with their Jellyfin account. The password login stays an optional fallback.
+
+**When Jellyfin is down**, its users' files can't be checked, so moving files back to the array is skipped for that run, Plex's files included. Items the other server reported are still cached.
+
+Env vars override the settings file (in the Community Apps template they are under **Show more settings**):
 
 | Env var | Settings key | Example |
 |---|---|---|
 | `JELLYFIN_URL` | `jellyfin_url` | `http://jellyfin:8096` |
 | `JELLYFIN_API_KEY` | `jellyfin_api_key` | |
-| `JELLYFIN_PATH_MAPPINGS` (JSON) | `jellyfin_path_mappings` | `{"/media/": "/mnt/user/plex-media/"}` |
+| `JELLYFIN_PATH_MAPPINGS` (JSON, older setups) | `jellyfin_path_mappings` | `{"/media/": "/mnt/user/plex-media/"}` |
 | `JELLYFIN_SKIP_USERS` (comma-separated) | `jellyfin_skip_users` | `guest,kid` |
 | `JELLYFIN_FAVORITES_TOGGLE` | `jellyfin_favorites_toggle` | `true` |
 
-`jellyfin_path_mappings` translates the paths Jellyfin reports into the paths Plex reports, so the regular path mappings apply. Prefixes match whole folders (`/media` does not match `/media2`), trailing slashes don't matter. Items without a matching prefix are ignored and logged once per library folder as `[JELLYFIN] Skipping unmapped path`.
-
-Jellyfin has no watchlist. With `jellyfin_favorites_toggle` (and `watchlist_toggle`) on, unplayed favorites stand in for it: favorite movies, and the first `watchlist_episodes` unplayed episodes of favorite series (specials skipped). They follow the watchlist rules, including `watchlist_retention_days`, counted from the first run that sees the favorite since Jellyfin doesn't record when it was set.
-
-All enabled Jellyfin users are fetched, regardless of `users_toggle` (that setting only applies to Plex). Use `jellyfin_skip_users` to leave users out.
-
-If any Jellyfin request fails, moving files back to the array is skipped for that run — for Plex files too, since PlexCache can't tell whether a Jellyfin user is still watching them. Remove the Jellyfin URL/API key if Jellyfin is offline for longer.
+Path prefixes match whole folders (`/media` does not match `/media2`), and trailing slashes don't matter. Jellyfin items in no mapped folder are ignored and logged once per library folder as `[JELLYFIN] Skipping unmapped path`.
 
 ## Notes
 

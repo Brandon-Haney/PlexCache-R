@@ -11,7 +11,7 @@
         {% if not libraries %}
         <div class="alert alert-error">
             <i data-lucide="alert-circle"></i>
-            <span>Could not fetch libraries from Plex. Please check your connection.</span>
+            <span>Could not fetch libraries from {{ 'Jellyfin' if server == 'jellyfin' else 'Plex' }}. Please check your connection.</span>
         </div>
         {% else %}
 
@@ -73,6 +73,12 @@
             </p>
         </div>
 
+        {% if server == 'jellyfin' %}
+        <p class="help-text">
+            The real and cache paths for each library are worked out from Jellyfin's folders.
+            Check them afterwards on Settings &gt; Libraries, under Edit Paths.
+        </p>
+        {% else %}
         <div class="form-group">
             <label>Path Mappings <span style="font-weight: normal; color: var(--plex-text-muted);">(Advanced)</span></label>
             <p class="help-text" style="margin-bottom: 0.75rem;">
@@ -146,6 +152,7 @@
                 Add Path Mapping
             </button>
         </div>
+        {% endif %}
 
         {% endif %}
     </div>

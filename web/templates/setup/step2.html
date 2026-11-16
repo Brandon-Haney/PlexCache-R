@@ -1,11 +1,58 @@
 {% extends "setup/base_setup.html" %}
 
 {% block content %}
+{% if server == 'jellyfin' %}
+<form id="jellyfin-form" action="/setup/step2/jellyfin" method="post">
+    <div class="setup-content">
+        <h2>Connect to Jellyfin</h2>
+        <p class="description">
+            Use Jellyfin as your media server: the files its users have in Continue Watching and
+            Next Up are cached. Needs Jellyfin 10.9 or newer.
+        </p>
+
+        {% if error %}
+        <div class="alert alert-error">
+            <i data-lucide="alert-circle"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <div class="form-group">
+            <label for="jellyfin_url">Jellyfin URL</label>
+            <input type="text" id="jellyfin_url" name="jellyfin_url" value="{{ jellyfin_url }}"
+                   placeholder="http://192.168.1.x:8096" {% if jellyfin_url_from_env %}readonly{% else %}required{% endif %}>
+            <p class="help-text">{% if jellyfin_url_from_env %}Set by the container's JELLYFIN_URL variable{% else %}The address of your Jellyfin server (include the port){% endif %}</p>
+        </div>
+
+        <div class="form-group">
+            <label for="jellyfin_api_key">API Key</label>
+            <input type="password" id="jellyfin_api_key" name="jellyfin_api_key" value="{{ jellyfin_api_key }}"
+                   placeholder="Jellyfin API key" autocomplete="off" {% if jellyfin_api_key_from_env %}readonly{% else %}required{% endif %}>
+            <p class="help-text">{% if jellyfin_api_key_from_env %}Set by the container's JELLYFIN_API_KEY variable{% else %}Create one in Jellyfin under Dashboard &gt; API Keys{% endif %}</p>
+        </div>
+
+        <p class="help-text">Use Plex as well? Set up Plex here instead, then add Jellyfin under Settings &gt; Media Servers.
+            <a href="/setup?step=2&amp;server=plex" style="color: var(--accent-primary);">Use Plex</a></p>
+    </div>
+
+    <div class="setup-footer">
+        <a href="/setup?step=1" class="btn btn-secondary">
+            <i data-lucide="arrow-left"></i>
+            Back
+        </a>
+        <button type="submit" class="btn btn-primary">
+            <span class="btn-text">Next</span>
+            <i data-lucide="arrow-right" class="btn-icon"></i>
+        </button>
+    </div>
+</form>
+{% else %}
 <form id="plex-form" action="/setup/step2" method="post">
     <div class="setup-content">
         <h2>Connect to Plex</h2>
         <p class="description">
             Enter your Plex server details or sign in with your Plex account.
+            Using Jellyfin without Plex? <a href="/setup?step=2&amp;server=jellyfin" style="color: var(--accent-primary);">Use Jellyfin</a>
         </p>
 
         {% if error %}
@@ -64,9 +111,11 @@
         </button>
     </div>
 </form>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
+{% if server != 'jellyfin' %}
 <script>
     let oauthPollInterval = null;
     let oauthPopup = null;
@@ -353,4 +402,5 @@
           .catch(err => console.log('User prefetch skipped:', err));
     }
 </script>
+{% endif %}
 {% endblock %}

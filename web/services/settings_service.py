@@ -523,8 +523,14 @@ class SettingsService:
         same translation the run did. An entry that covered a mapping is removed;
         one that covered none is kept, and still applies in the run. Running it
         again changes nothing. Returns whether raw changed.
+
+        The JELLYFIN_PATH_MAPPINGS env var replaces the file's entries in the run
+        (ConfigManager._load_jellyfin_config), so when it is set its entries are
+        the ones folded; it can't be edited from here and keeps applying to
+        anything no mapping covers.
         """
-        legacy = raw.get("jellyfin_path_mappings")
+        from_env = self._env_jellyfin_path_mappings()
+        legacy = from_env if from_env is not None else raw.get("jellyfin_path_mappings")
         if not isinstance(legacy, dict) or not legacy:
             return False
         remaining = {}
@@ -543,9 +549,25 @@ class SettingsService:
                 remaining[jellyfin_prefix] = plex_prefix
         if changed:
             self._backup_settings(raw, "before-jellyfin-paths")
-            raw["jellyfin_path_mappings"] = remaining
-            logger.info("Moved jellyfin_path_mappings onto the path mappings they cover")
+            if from_env is None:
+                raw["jellyfin_path_mappings"] = remaining
+            logger.info("Moved %s onto the path mappings they cover",
+                        "JELLYFIN_PATH_MAPPINGS" if from_env is not None else "jellyfin_path_mappings")
         return changed
+
+    @staticmethod
+    def _env_jellyfin_path_mappings() -> Optional[Dict[str, str]]:
+        """The JELLYFIN_PATH_MAPPINGS env var as the run reads it, or None if unset or invalid."""
+        value = os.environ.get("JELLYFIN_PATH_MAPPINGS")
+        if not value:
+            return None
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        return {k: v for k, v in parsed.items() if isinstance(k, str) and isinstance(v, str) and k and v}
 
     def _backup_settings(self, raw: Dict[str, Any], label: str) -> None:
         """Keep a copy of the settings file in the data folder before a migration rewrites it."""

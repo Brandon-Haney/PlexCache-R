@@ -157,3 +157,24 @@ def test_a_wizard_jellyfin_only_file_survives_a_run(tmp_path):
     again = _load(path)
     assert _where_jellyfin_files_go(again) == _where_jellyfin_files_go(first)
     assert _where_jellyfin_files_go(again)["/media/movies/Dune (2021)/Dune.mkv"] == "/mnt/user/movies/Dune (2021)/Dune.mkv"
+
+
+@pytest.mark.critical
+def test_moving_the_env_vars_mappings_changes_where_no_file_goes(tmp_path, monkeypatch):
+    """With JELLYFIN_PATH_MAPPINGS set (the CA template field), the run reads the env var, not the file."""
+    from web.services.settings_service import SettingsService
+    monkeypatch.setenv("JELLYFIN_PATH_MAPPINGS", json.dumps({"/media/movies": "/data/movies",
+                                                            "/media/shows": "/data/tv"}))
+    settings = {k: v for k, v in V330_BOTH.items() if k != "jellyfin_path_mappings"}
+    before = _where_jellyfin_files_go(_load(_write(tmp_path, settings)))
+    assert before["/media/shows/Andor/Season 2/Andor S02E01.mkv"] == "/mnt/user/media/tv/Andor/Season 2/Andor S02E01.mkv"
+
+    raw = copy.deepcopy(settings)
+    svc = SettingsService.__new__(SettingsService)
+    svc._load_raw = lambda: settings
+    with patch("web.services.settings_service.DATA_DIR", tmp_path):
+        assert svc.fold_jellyfin_path_mappings(raw) is True
+        assert svc.fold_jellyfin_path_mappings(raw) is False
+    assert [m.get("jellyfin_path") for m in raw["path_mappings"]] == ["/media/movies", "/media/shows", None]
+    assert "jellyfin_path_mappings" not in raw  # the env var is left to the container
+    assert _where_jellyfin_files_go(_load(_write(tmp_path, raw, "folded.json"))) == before

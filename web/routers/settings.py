@@ -293,9 +293,31 @@ def settings_users(request: Request):
             "page_title": "User Settings",
             "active_tab": "users",
             "settings": user_settings,
-            "has_plex_config": has_plex_config
+            "has_plex_config": has_plex_config,
+            "plex_on": plex_enabled(settings_service.get_all()),
+            "jellyfin_on": jellyfin_configured(settings_service.get_all()),
+            "jellyfin_favorites": settings_service.get_jellyfin_settings()["favorites_toggle"],
         }
     )
+
+
+@router.get("/users/jellyfin", response_class=HTMLResponse)
+def get_jellyfin_users(request: Request, retry: bool = False):
+    """Jellyfin users with whether each is cached (lazy-loaded: they come from Jellyfin)"""
+    settings_service = get_settings_service()
+    if retry:
+        settings_service._jellyfin_cache = {}
+    return templates.TemplateResponse(
+        request, "settings/partials/jellyfin_users.html", settings_service.jellyfin_user_rows())
+
+
+@router.put("/jellyfin/users", response_class=HTMLResponse)
+def save_jellyfin_users(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
+    """Save which Jellyfin users are cached (the rest go into jellyfin_skip_users)"""
+    settings_service = get_settings_service()
+    if settings_service.save_jellyfin_cached_users(form_data.getlist("cached_user")):
+        return _page_alert("success", "Jellyfin users saved")
+    return _page_alert("error", "Failed to save Jellyfin users")
 
 
 @router.get("/users/list", response_class=HTMLResponse)

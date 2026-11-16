@@ -128,8 +128,24 @@ _INDEX: List[Dict[str, Any]] = [
         "icon": "folder", "tone": "tone-info",
         "keywords": ["path", "mapping", "mappings", "mount", "docker", "remap", "/mnt/", "/data/", "translate", "host cache", "plex path", "real path", "cache path", "name"],
     },
+    {
+        "tab": "libraries", "setting_id": "jellyfin_library_toggles",
+        "label": "Jellyfin Libraries",
+        "hint": "Pick which Jellyfin libraries to cache from, and set their Jellyfin, real and cache paths.",
+        "section": "Libraries", "subsection": "Jellyfin",
+        "icon": "server", "tone": "tone-purple",
+        "keywords": ["jellyfin", "library", "libraries", "enable", "jellyfin path", "path"],
+    },
 
     # --- Users -------------------------------------------------------------
+    {
+        "tab": "users", "setting_id": "jellyfin_users",
+        "label": "Jellyfin Users",
+        "hint": "Choose whose Continue Watching and Next Up are cached.",
+        "section": "Users", "subsection": "Jellyfin",
+        "icon": "server", "tone": "tone-purple",
+        "keywords": ["jellyfin", "users", "skip", "exclude", "who"],
+    },
     {
         "tab": "users", "setting_id": "users_toggle",
         "label": "Enable Multi-User Support",

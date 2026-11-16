@@ -434,6 +434,27 @@ class SettingsService:
         """{"items": [user, ...], "error": str or None} (core.jellyfin_api.JellyfinManager.list_users)."""
         return self._jellyfin_cached("users", lambda client: client.list_users())
 
+    def jellyfin_user_rows(self) -> Dict[str, Any]:
+        """Jellyfin users for Settings > Users, each with whether it's cached (not in jellyfin_skip_users)."""
+        fetched = self.get_jellyfin_users()
+        env_skip = os.environ.get("JELLYFIN_SKIP_USERS")
+        if env_skip:
+            skipped = {name.strip() for name in env_skip.split(",") if name.strip()}
+        else:
+            stored = self._load_raw().get("jellyfin_skip_users", []) or []
+            skipped = {str(name).strip() for name in (stored.split(",") if isinstance(stored, str) else stored)}
+        users = [{**user, "cached": user["name"] not in skipped and not user["is_disabled"]}
+                 for user in fetched["items"]]
+        return {"users": users, "error": fetched["error"], "skip_from_env": bool(env_skip)}
+
+    def save_jellyfin_cached_users(self, cached_names: List[str]) -> bool:
+        """Cache every enabled Jellyfin user named here; the others go into jellyfin_skip_users."""
+        users = self.get_jellyfin_users()["items"]
+        cached = set(cached_names)
+        raw = self._load_raw()
+        raw["jellyfin_skip_users"] = sorted(u["name"] for u in users if not u["is_disabled"] and u["name"] not in cached)
+        return self._save_raw(raw)
+
     # ------------------------------------------------------------------
     # Jellyfin libraries on Settings > Libraries
     # ------------------------------------------------------------------

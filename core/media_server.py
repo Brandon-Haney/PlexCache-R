@@ -320,8 +320,8 @@ class JellyfinServer:
     ondeck_incomplete_warning = (
         "Skipping array restore - Jellyfin OnDeck data incomplete (Jellyfin unreachable "
         "or a request failed, see errors above)",
-        "Plex files are held on cache too until Jellyfin answers; "
-        "remove the Jellyfin URL/API key to stop using it as an OnDeck source",
+        "Files stay on cache until Jellyfin answers, any server's included; "
+        "switch Jellyfin off under Settings > Media Servers to stop using it",
     )
     watchlist_incomplete_warning = (
         "Skipping array restore - Jellyfin favorites incomplete (Jellyfin unreachable "

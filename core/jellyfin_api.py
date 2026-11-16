@@ -8,27 +8,17 @@ the regular path_mappings handle them like any Plex item.
 import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import requests
 
-from core.plex_api import OnDeckItem, PlexManager
-
-
-# Same shape as PlexManager.get_watchlist_media items:
-# (file_path, username, watchlisted_at, episode_info, rating_key, media_type)
-WatchlistItem = Tuple[str, str, Optional[datetime], Optional[Dict[str, Any]], Optional[str], str]
+from core.media_server import ActiveSessions, OnDeckItem, WatchlistItem  # noqa: F401 (re-exported)
+from core.plex_api import PlexManager
 
 REQUEST_TIMEOUT = 30
 ITEM_FIELDS = "Path,MediaSources"
 # RunTimeTicks are 100ns units
 TICKS_PER_MS = 10_000
-
-
-class ActiveSessions(NamedTuple):
-    """Jellyfin playback sessions. count includes sessions whose path has no mapping."""
-    count: int
-    paths: List[str]
 
 
 def _normalize_prefix(prefix: str) -> str:

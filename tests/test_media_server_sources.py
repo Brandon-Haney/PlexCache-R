@@ -182,28 +182,48 @@ class TestWatchlistPruneSources:
 
 
 class TestCompleteWatchlistSources:
-    def _app(self, plex_complete=True, jellyfin=True, favorites=True, favorites_complete=True):
-        from core.app import PlexCacheApp
-        app = object.__new__(PlexCacheApp)
-        app.config_manager = MagicMock()
-        app.config_manager.jellyfin.favorites_toggle = favorites
-        app.plex_manager = MagicMock()
-        app.plex_manager.is_watchlist_data_complete.return_value = plex_complete
-        app.jellyfin_manager = MagicMock() if jellyfin else None
+    """Which servers' watchlists were complete this run (core.media_server)."""
+
+    def _servers(self, plex_complete=True, rss_fails=False, jellyfin=True, favorites=True,
+                 favorites_complete=True):
+        from core.media_server import JellyfinServer, PlexServer
+        config = MagicMock()
+        config.plex.users = []
+        config.cache.remote_watchlist_toggle = rss_fails
+        config.cache.remote_watchlist_rss_url = "https://rss.example/feed" if rss_fails else ""
+        config.jellyfin.favorites_toggle = favorites
+        plex = MagicMock()
+        plex.is_watchlist_data_complete.return_value = plex_complete
+
+        def watchlist(*args, rss_url=None, **kwargs):
+            if rss_url:
+                raise OSError("RSS feed unreachable")
+            return []
+
+        plex.get_watchlist_media.side_effect = watchlist
+        servers = [PlexServer(plex, config, lambda session: None)]
         if jellyfin:
-            app.jellyfin_manager.is_favorites_data_complete.return_value = favorites_complete
-        return app
+            jelly = MagicMock()
+            jelly.get_favorite_media.return_value = []
+            jelly.is_favorites_data_complete.return_value = favorites_complete
+            servers.append(JellyfinServer(jelly, config))
+        return servers
+
+    def _complete(self, **kwargs):
+        from core.media_server import complete_watchlist_sources
+        servers = self._servers(**kwargs)
+        return complete_watchlist_sources([s.key for s in servers if not s.get_watchlist(3).complete])
 
     def test_all_complete(self):
-        assert self._app()._complete_watchlist_sources(rss_failed=False) == {"plex", "jellyfin"}
+        assert self._complete() == {"plex", "jellyfin"}
 
     def test_plex_incomplete_or_rss_failed(self):
-        assert self._app(plex_complete=False)._complete_watchlist_sources(False) == {"jellyfin"}
-        assert self._app()._complete_watchlist_sources(rss_failed=True) == {"jellyfin"}
+        assert self._complete(plex_complete=False) == {"jellyfin"}
+        assert self._complete(rss_fails=True) == {"jellyfin"}
 
     def test_jellyfin_favorites_failed(self):
-        assert self._app(favorites_complete=False)._complete_watchlist_sources(False) == {"plex"}
+        assert self._complete(favorites_complete=False) == {"plex"}
 
     def test_jellyfin_off_or_favorites_off_counts_as_complete(self):
-        assert "jellyfin" in self._app(jellyfin=False)._complete_watchlist_sources(False)
-        assert "jellyfin" in self._app(favorites=False)._complete_watchlist_sources(False)
+        assert "jellyfin" in self._complete(jellyfin=False)
+        assert "jellyfin" in self._complete(favorites=False)

@@ -29,7 +29,8 @@ from core.config import ConfigManager
 from core.logging_config import LoggingManager, reset_warning_error_flag
 from core.system_utils import SystemDetector, FileUtils, SingleInstanceLock, get_disk_usage, get_array_direct_path, detect_zfs, set_zfs_prefixes, format_bytes, create_dir_with_ownership, check_cache_share_alignment, cleanup_empty_parent_folders, resolve_cache_boundary, sweep_empty_folders
 from core.plex_api import PlexManager, OnDeckItem
-from core.jellyfin_api import ActiveSessions, JellyfinManager
+from core.jellyfin_api import JellyfinManager
+from core.media_server import JellyfinServer, MediaServer, PlexServer, complete_watchlist_sources
 from core.file_operations import MultiPathModifier, SiblingFileFinder, FileFilter, FileMover, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration, get_media_identity, find_matching_plexcached, is_directory_level_file, is_video_file, save_json_atomically
 from core.pinned_media import PinnedMediaTracker, resolve_pins_to_paths
 
@@ -560,6 +561,20 @@ class PlexCacheApp:
 
         return False
 
+    @property
+    def media_servers(self) -> List[MediaServer]:
+        """The media servers a run asks, Plex first (core/media_server.py).
+
+        Built from the server clients each time, so it always reflects which
+        servers are set up.
+        """
+        servers: List[MediaServer] = []
+        if getattr(self, 'plex_manager', None) is not None:
+            servers.append(PlexServer(self.plex_manager, self.config_manager, self._get_media_path_from_session))
+        if getattr(self, 'jellyfin_manager', None) is not None:
+            servers.append(JellyfinServer(self.jellyfin_manager, self.config_manager))
+        return servers
+
     def _init_plex_manager(self) -> None:
         """Initialize the Plex manager with token cache."""
         logging.debug("Initializing Plex manager...")
@@ -1080,42 +1095,25 @@ class PlexCacheApp:
                 logging.error(f"Failed to save new users to settings: {e}")
 
     def _check_active_sessions(self) -> None:
-        """Check for active Plex and Jellyfin sessions."""
-        sessions = self.plex_manager.get_active_sessions()
-        jellyfin_sessions = (self.jellyfin_manager.get_active_sessions() if self.jellyfin_manager
-                             else ActiveSessions(0, []))
-        # Count sessions, not paths: a session on an unmapped Jellyfin path still counts
-        active_servers = [name for name, found in (("Plex", sessions), ("Jellyfin", jellyfin_sessions.count))
-                          if found]
+        """Skip the files playing on any media server (or exit, if configured to)."""
+        found = [(server, server.get_active_sessions()) for server in self.media_servers]
+        # Count sessions, not paths: a session on an unmapped path still counts
+        active_servers = [server.label for server, sessions in found if sessions.count]
         if not active_servers:
             return
         if self.config_manager.exit_if_active_session:
             message = f"There is an active session on {' and '.join(active_servers)}. Exiting..."
             logging.warning(message)
             sys.exit(message)
-        if sessions:
-            self._process_active_sessions(sessions)
-        if jellyfin_sessions.paths:
-            for real_path in self.file_path_modifier.modify_file_paths(jellyfin_sessions.paths):
-                logging.debug(f"Skipping active Jellyfin session file: {real_path}")
+        for server, sessions in found:
+            if not sessions.paths:
+                continue
+            # Convert server paths to real paths so they match during filtering
+            for real_path in self.file_path_modifier.modify_file_paths(sessions.paths):
+                logging.debug(f"Skipping active {server.label} session file: {real_path}")
                 self.files_to_skip.append(real_path)
         if self.files_to_skip:
             logging.info(f"[FILTER] Skipped {len(self.files_to_skip)} active session(s)")
-    
-    def _process_active_sessions(self, sessions: List) -> None:
-        """Process active sessions and add files to skip list."""
-        for session in sessions:
-            try:
-                media_path = self._get_media_path_from_session(session)
-                if media_path:
-                    # Convert Plex path to real path so it matches during filtering
-                    converted_paths = self.file_path_modifier.modify_file_paths([media_path])
-                    if converted_paths:
-                        converted_path = converted_paths[0]
-                        logging.debug(f"Skipping active session file: {converted_path}")
-                        self.files_to_skip.append(converted_path)
-            except (AttributeError, KeyError, TypeError, OSError) as e:
-                logging.error(f"Error processing session {session}: {type(e).__name__}: {e}")
 
     def _get_media_path_from_session(self, session) -> Optional[str]:
         """Extract media file path from a Plex session. Returns None if unable to extract."""
@@ -1187,25 +1185,15 @@ class PlexCacheApp:
             logging.info("Operation stopped during media processing")
             return
 
-        # Fetch OnDeck Media - returns List[OnDeckItem] with file path, username, and episode metadata
+        # Fetch OnDeck Media from every server - List[OnDeckItem] with file path, username, and episode metadata
         logging.debug("Fetching OnDeck media...")
-        ondeck_items_list = self.plex_manager.get_on_deck_media(
-            self.config_manager.plex.valid_sections or [],
-            self.config_manager.plex.days_to_monitor,
-            self.config_manager.plex.number_episodes,
-            self.config_manager.plex.users_toggle,
-            self.config_manager.plex.skip_ondeck or [],
-            per_user_days=self.config_manager.plex.per_user_ondeck_days,
-            prefetch_minimum_minutes=self.config_manager.cache.prefetch_minimum_minutes
-        )
-        if self.jellyfin_manager:
-            jellyfin_items = self.jellyfin_manager.get_on_deck_media(
+        ondeck_items_list: List[OnDeckItem] = []
+        for server in self.media_servers:
+            ondeck_items_list.extend(server.get_on_deck(
                 self.config_manager.plex.days_to_monitor,
                 self.config_manager.plex.number_episodes,
-                prefetch_minimum_minutes=self.config_manager.cache.prefetch_minimum_minutes
-            )
-            logging.info(f"[FETCH] Jellyfin OnDeck: {len(jellyfin_items)} items")
-            ondeck_items_list.extend(jellyfin_items)
+                self.config_manager.cache.prefetch_minimum_minutes,
+            ))
 
         # Extract just the file paths for path modification
         ondeck_files = [item.file_path for item in ondeck_items_list]
@@ -1385,30 +1373,28 @@ class PlexCacheApp:
         # off, no cached file is held by the watchlist, so incomplete plex.tv data
         # can't cause a wrong move.
         if self.config_manager.cache.watched_move:
-            if not self.plex_manager.is_ondeck_data_complete():
-                logging.warning("Skipping array restore - OnDeck data incomplete (Plex server unreachable)")
-                logging.warning("Files will remain on cache until next successful run")
-            elif self.jellyfin_manager and not self.jellyfin_manager.is_ondeck_data_complete():
-                logging.warning("Skipping array restore - Jellyfin OnDeck data incomplete (Jellyfin unreachable "
-                                "or a request failed, see errors above)")
-                logging.warning("Plex files are held on cache too until Jellyfin answers; "
-                                "remove the Jellyfin URL/API key to stop using it as an OnDeck source")
-            elif (self.config_manager.cache.watchlist_toggle
-                    and not self.plex_manager.is_watchlist_data_complete()):
-                logging.warning("Skipping array restore - watchlist data incomplete (plex.tv unreachable)")
-                logging.warning("Files will remain on cache until next successful run")
-            elif (self.config_manager.cache.watchlist_toggle
-                    and self.config_manager.jellyfin.favorites_toggle
-                    and self.jellyfin_manager
-                    and not self.jellyfin_manager.is_favorites_data_complete()):
-                logging.warning("Skipping array restore - Jellyfin favorites incomplete (Jellyfin unreachable "
-                                "or a request failed, see errors above)")
-                logging.warning("Files will remain on cache until next successful run")
+            reason = self._move_back_wait_reason()
+            if reason is not None:
+                for line in reason:
+                    logging.warning(line)
             else:
                 logging.debug("Checking for files to move back to array...")
                 # Provide Plex media type metadata for classification
                 self.file_filter.set_media_info_map(self.media_info_map)
                 self._check_files_to_move_back_to_array()
+
+    def _move_back_wait_reason(self) -> Optional[Tuple[str, str]]:
+        """Why moving watched files back has to wait this run, or None if it can go ahead.
+
+        Every server's OnDeck first, then every server's watchlist (only when
+        watchlist caching is on: with it off, no cached file is held by the
+        watchlist, so incomplete watchlist data can't cause a wrong move).
+        """
+        servers = self.media_servers
+        reason = next((s.ondeck_incomplete_warning for s in servers if not s.is_ondeck_complete()), None)
+        if reason is None and self.config_manager.cache.watchlist_toggle:
+            reason = next((s.watchlist_incomplete_warning for s in servers if not s.is_watchlist_complete()), None)
+        return reason
 
     def _process_pinned_media(self, modified_paths: Dict[str, None]) -> None:
         """Resolve pinned media to real-path file set and merge into the run.
@@ -1547,21 +1533,6 @@ class PlexCacheApp:
             f"(+{len(pinned_sibling_paths)} sibling files)"
         )
 
-    def _complete_watchlist_sources(self, rss_failed: bool) -> Set[str]:
-        """Media servers whose watchlist data this run is complete, so a missing item really dropped off.
-
-        A server without a complete fetch keeps its recorded sources, so an outage never
-        relabels the badges. Jellyfin counts as complete when favorites are off: it then
-        reports nothing, and old favorite labels should go.
-        """
-        complete = set()
-        if self.plex_manager.is_watchlist_data_complete() and not rss_failed:
-            complete.add('plex')
-        if (not self.jellyfin_manager or not self.config_manager.jellyfin.favorites_toggle
-                or self.jellyfin_manager.is_favorites_data_complete()):
-            complete.add('jellyfin')
-        return complete
-
     def _process_watchlist(self) -> set:
         """Process watchlist media (local API + remote RSS) and return a set of modified file paths and subtitles.
 
@@ -1575,127 +1546,57 @@ class PlexCacheApp:
         expired_count = 0
         # Which media server reported each tracker path this run, to prune stale sources
         seen_sources: Dict[str, Set[str]] = {}
-        rss_failed = False
 
         try:
             if retention_days > 0:
                 logging.debug(f"Watchlist retention enabled: {retention_days} days")
 
-            # --- Local Plex users ---
-            # API returns (file_path, username, watchlisted_at, episode_info) tuples
-            # Build list of home users from settings (only home users have accessible watchlists)
-            home_users = [
-                u.get("title") for u in self.config_manager.plex.users
-                if u.get("is_local", False)
-            ]
-            fetched_watchlist = list(self.plex_manager.get_watchlist_media(
-                self.config_manager.plex.valid_sections,
-                self.config_manager.cache.watchlist_episodes,
-                self.config_manager.plex.users_toggle,
-                self.config_manager.plex.skip_watchlist,
-                home_users=home_users
-            ))
+            # Every server's watchlist: Plex home users then remote users (RSS),
+            # then Jellyfin favorites (Jellyfin has no watchlist)
+            incomplete_sources: List[str] = []
+            remote_count = 0
+            rss_expired_count = 0
+            for server in self.media_servers:
+                fetch = server.get_watchlist(self.config_manager.cache.watchlist_episodes)
+                if not fetch.complete:
+                    incomplete_sources.append(server.key)
+                remote_count += fetch.remote_count
+                # RSS items come last in a server's list
+                first_remote = len(fetch.items) - fetch.remote_count
 
-            for item in fetched_watchlist:
-                if self.should_stop:
-                    logging.info("Operation stopped during watchlist processing")
-                    return result_set
-                file_path, username, watchlisted_at, episode_info, rating_key, media_type = item
-
-                # Update watchlist tracker with timestamp and rating_key
-                self.watchlist_tracker.update_entry(
-                    file_path, username, watchlisted_at,
-                    rating_key=rating_key, media_type=media_type,
-                )
-                seen_sources.setdefault(file_path, set()).add('plex')
-
-                # Check watchlist retention (skip expired items, with per-user override)
-                user_retention = per_user_wl_days.get(username, retention_days)
-                if user_retention > 0:
-                    if self.watchlist_tracker.is_expired(file_path, user_retention, username=username):
-                        expired_count += 1
-                        continue
-
-                result_set.add(file_path)
-                plex_path_to_info[file_path] = episode_info
-
-            if self.should_stop:
-                logging.info("Operation stopped during watchlist processing")
-                return result_set
-
-            # --- Remote users via RSS ---
-            if self.config_manager.cache.remote_watchlist_toggle and self.config_manager.cache.remote_watchlist_rss_url:
-                logging.debug("Fetching watchlist via RSS feed for remote users...")
-                try:
-                    # Use get_watchlist_media with rss_url parameter; users_toggle=False because this is just RSS
-                    # RSS items return (file_path, username, pubDate, episode_info) tuples
-                    remote_items = list(
-                        self.plex_manager.get_watchlist_media(
-                            valid_sections=self.config_manager.plex.valid_sections,
-                            watchlist_episodes=self.config_manager.cache.watchlist_episodes,
-                            users_toggle=False,  # only RSS, no local Plex users
-                            skip_watchlist=self.config_manager.plex.skip_watchlist,
-                            rss_url=self.config_manager.cache.remote_watchlist_rss_url
-                        )
-                    )
-                    logging.debug(f"Found {len(remote_items)} remote watchlist items from RSS")
-                    rss_expired_count = 0
-                    for item in remote_items:
-                        if self.should_stop:
-                            logging.info("Operation stopped during watchlist processing")
-                            return result_set
-                        file_path, username, watchlisted_at, episode_info, rating_key, media_type = item
-                        # Update tracker (RSS items use pubDate from feed)
-                        self.watchlist_tracker.update_entry(
-                            file_path, username, watchlisted_at,
-                            rating_key=rating_key, media_type=media_type,
-                        )
-                        seen_sources.setdefault(file_path, set()).add('plex')
-
-                        # Check watchlist retention (skip expired items, with per-user override)
-                        rss_user_retention = per_user_wl_days.get(username, retention_days)
-                        if rss_user_retention > 0:
-                            if self.watchlist_tracker.is_expired(file_path, rss_user_retention, username=username):
-                                rss_expired_count += 1
-                                continue
-
-                        result_set.add(file_path)
-                        plex_path_to_info[file_path] = episode_info
-
-                    if rss_expired_count > 0:
-                        # Stays DEBUG: this is a per-source breakdown that is
-                        # folded into expired_count and reported by the INFO
-                        # summary below. Promoting it would report twice.
-                        expired_count += rss_expired_count
-                        logging.debug(f"Skipped {rss_expired_count} RSS watchlist items due to retention expiry")
-                except Exception as e:
-                    rss_failed = True
-                    logging.error(f"Failed to fetch remote watchlist via RSS: {str(e)}")
-
-            # --- Jellyfin favorites (Jellyfin has no watchlist) ---
-            if self.jellyfin_manager and self.config_manager.jellyfin.favorites_toggle:
-                jellyfin_favorites = self.jellyfin_manager.get_favorite_media(
-                    self.config_manager.cache.watchlist_episodes)
-                logging.info(f"[FETCH] Jellyfin favorites: {len(jellyfin_favorites)} items")
-                for file_path, username, watchlisted_at, episode_info, rating_key, media_type in jellyfin_favorites:
+                for index, (file_path, username, watchlisted_at, episode_info, rating_key,
+                            media_type) in enumerate(fetch.items):
                     if self.should_stop:
                         logging.info("Operation stopped during watchlist processing")
                         return result_set
-                    # No favorited-at date in Jellyfin: the tracker counts from the first run that sees it
+
+                    # Update watchlist tracker with timestamp and rating_key. A Jellyfin
+                    # favorite has no date: the tracker counts from the first run that sees it
                     self.watchlist_tracker.update_entry(
                         file_path, username, watchlisted_at,
-                        rating_key=rating_key, media_type=media_type, source='jellyfin',
+                        rating_key=rating_key, media_type=media_type, source=server.key,
                     )
-                    seen_sources.setdefault(file_path, set()).add('jellyfin')
+                    seen_sources.setdefault(file_path, set()).add(server.key)
+
+                    # Check watchlist retention (skip expired items, with per-user override)
                     user_retention = per_user_wl_days.get(username, retention_days)
                     if user_retention > 0:
                         if self.watchlist_tracker.is_expired(file_path, user_retention, username=username):
                             expired_count += 1
+                            if index >= first_remote:
+                                rss_expired_count += 1
                             continue
+
                     result_set.add(file_path)
                     plex_path_to_info[file_path] = episode_info
 
-            self.watchlist_tracker.prune_sources(seen_sources, self._complete_watchlist_sources(rss_failed))
+            if rss_expired_count > 0:
+                # Stays DEBUG: this is a per-source breakdown that is
+                # folded into expired_count and reported by the INFO
+                # summary below. Promoting it would report twice.
+                logging.debug(f"Skipped {rss_expired_count} RSS watchlist items due to retention expiry")
+
+            self.watchlist_tracker.prune_sources(seen_sources, complete_watchlist_sources(incomplete_sources))
 
             if expired_count > 0:
                 # INFO, matching the OnDeck twin above: items dropping out of
@@ -1706,8 +1607,7 @@ class PlexCacheApp:
 
             # Log watchlist summary (show unique item count - raw counts include duplicates across users)
             total_watchlist = len(result_set)
-            has_remote = 'remote_items' in locals() and len(remote_items) > 0
-            source_info = " (local + remote)" if has_remote else ""
+            source_info = " (local + remote)" if remote_count > 0 else ""
             logging.info(f"[FETCH] Watchlist: {total_watchlist} items{source_info}")
 
             # Modify file paths and build plex→real mapping for media_info_map

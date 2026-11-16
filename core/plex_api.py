@@ -109,23 +109,8 @@ def ensure_plex_client_identity(settings_file: str) -> Optional[str]:
     return client_id
 
 
-@dataclass
-class OnDeckItem:
-    """Represents an OnDeck item with metadata.
-
-    Attributes:
-        file_path: Path to the media file.
-        username: The user who has this on their OnDeck.
-        episode_info: For TV episodes, dict with 'show', 'season', 'episode' keys.
-        is_current_ondeck: True if this is the actual OnDeck episode (not prefetched next).
-        source: Media server that reported it ("plex" or "jellyfin").
-    """
-    file_path: str
-    username: str
-    episode_info: Optional[Dict[str, any]] = None
-    is_current_ondeck: bool = False
-    rating_key: Optional[str] = None
-    source: str = "plex"
+# OnDeckItem lives in core.media_server (shared with Jellyfin); kept importable from here
+from core.media_server import OnDeckItem  # noqa: E402,F401
 
 
 @dataclass

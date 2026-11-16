@@ -5,15 +5,23 @@
 <div class="card">
     <div class="card-header">
         <i data-lucide="link"></i>
-        <h2>Server Connection</h2>
+        <h2>Plex</h2>
     </div>
     <div class="card-body">
+        <div class="form-group" data-setting-id="plex_enabled">
+            <label class="switch">
+                <input type="checkbox" name="plex_enabled" value="true" {% if settings.plex_enabled %}checked{% endif %}>
+                <span>Use Plex</span>
+            </label>
+            <div class="form-hint">Switch off to use Jellyfin on its own. The Plex settings are kept.</div>
+        </div>
+
         <div class="grid grid-2">
             <div class="form-group" data-setting-id="plex_url">
                 <label for="plex_url">Plex URL</label>
                 <input type="text" id="plex_url" name="plex_url"
                        value="{{ settings.plex_url | default('http://localhost:32400') }}"
-                       placeholder="http://localhost:32400" required>
+                       placeholder="http://localhost:32400" {% if settings.plex_enabled %}required{% endif %}>
             </div>
 
             <div class="form-group mb-0" data-setting-id="plex_token">
@@ -21,7 +29,7 @@
                 <div class="flex gap-1">
                     <input type="password" id="plex_token" name="plex_token"
                            value="{{ settings.plex_token | default('') }}"
-                           placeholder="Your Plex token" style="flex: 1;" required>
+                           placeholder="Your Plex token" style="flex: 1;" {% if settings.plex_enabled %}required{% endif %}>
                     <button type="button" class="btn btn-secondary oauth-btn" data-setting-id="plex_oauth_btn" onclick="startPlexOAuth()" title="Sign in with Plex to get token automatically">
                         <i data-lucide="key"></i>
                         <span>Get Token</span>
@@ -51,6 +59,73 @@
                 Test Connection
             </button>
             <div id="plex-test-result"></div>
+        </div>
+    </div>
+</div>
+</form>
+
+<form hx-put="/settings/jellyfin" hx-target="#settings-alert-container" hx-swap="innerHTML">
+<div class="card">
+    <div class="card-header">
+        <i data-lucide="server"></i>
+        <h2>Jellyfin</h2>
+    </div>
+    <div class="card-body">
+        <p class="text-muted mb-2">Use Jellyfin on its own or next to Plex: the files its users have in
+            Continue Watching and Next Up are cached too. Needs Jellyfin 10.9 or newer.</p>
+
+        <div class="form-group" data-setting-id="jellyfin_enabled">
+            <label class="switch">
+                <input type="checkbox" name="jellyfin_enabled" value="true" {% if jellyfin.switched_on and jellyfin.configured %}checked{% endif %}>
+                <span>Use Jellyfin</span>
+            </label>
+        </div>
+
+        <div class="grid grid-2">
+            <div class="form-group" data-setting-id="jellyfin_url">
+                <label for="jellyfin_url">Jellyfin URL</label>
+                <input type="text" id="jellyfin_url" name="jellyfin_url" value="{{ jellyfin.url }}"
+                       placeholder="http://192.168.1.10:8096" {% if jellyfin.url_from_env %}readonly{% endif %}>
+                {% if jellyfin.url_from_env %}<div class="form-hint">Set by the container's JELLYFIN_URL variable</div>{% endif %}
+            </div>
+
+            <div class="form-group" data-setting-id="jellyfin_api_key">
+                <label for="jellyfin_api_key">API Key</label>
+                <input type="password" id="jellyfin_api_key" name="jellyfin_api_key" value="{{ jellyfin.api_key }}"
+                       placeholder="Jellyfin API key" autocomplete="off" {% if jellyfin.api_key_from_env %}readonly{% endif %}>
+                <div class="form-hint">
+                    {% if jellyfin.api_key_from_env %}Set by the container's JELLYFIN_API_KEY variable{% else %}Create one in Jellyfin under Dashboard &gt; API Keys{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="form-group mb-0" data-setting-id="jellyfin_favorites_toggle">
+            <label class="switch">
+                <input type="checkbox" name="jellyfin_favorites_toggle" value="true" {% if jellyfin.favorites_toggle %}checked{% endif %}>
+                <span>Cache unplayed favorites like a watchlist</span>
+            </label>
+            <div class="form-hint">Jellyfin has no watchlist. Needs watchlist caching on, under Caching.</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body" style="padding: 1rem 1.25rem;">
+        <div class="form-group mb-0" style="display: flex; gap: 1rem; align-items: center;">
+            <button type="submit" class="btn btn-primary">
+                <i data-lucide="save"></i>
+                Save Jellyfin
+            </button>
+            <button type="button" class="btn btn-secondary"
+                    data-setting-id="jellyfin_test"
+                    hx-post="/settings/jellyfin/test"
+                    hx-include="closest form"
+                    hx-target="#jellyfin-test-result"
+                    hx-swap="innerHTML">
+                <i data-lucide="plug"></i>
+                Test Connection
+            </button>
+            <div id="jellyfin-test-result"></div>
         </div>
     </div>
 </div>

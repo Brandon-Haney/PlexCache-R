@@ -20,6 +20,14 @@ ITEM_FIELDS = "Path,MediaSources"
 TICKS_PER_MS = 10_000
 
 
+# Jellyfin CollectionType -> the type names Plex libraries use, so the Web UI treats them alike
+_LIBRARY_TYPES = {"movies": "movie", "tvshows": "show", "music": "artist", "homevideos": "photo",
+                  "photos": "photo"}
+_LIBRARY_TYPE_LABELS = {"movies": "Movies", "tvshows": "TV Shows", "music": "Music",
+                        "homevideos": "Home Videos", "photos": "Photos", "mixed": "Mixed", "boxsets": "Collections",
+                        "musicvideos": "Music Videos", "books": "Books"}
+
+
 def _normalize_prefix(prefix: str) -> str:
     """Drop trailing slashes so '/media/' and '/media' behave the same; '/' becomes ''."""
     return prefix.rstrip('/')
@@ -138,6 +146,38 @@ class JellyfinManager:
         for item in on_deck_files:
             logging.debug(f"[JELLYFIN] [USER:{item.username}] OnDeck found: {item.file_path}")
         return on_deck_files
+
+    def get_server_info(self) -> Dict[str, Any]:
+        """Server name and version (GET /System/Info). Raises if Jellyfin can't be reached or the key is wrong."""
+        return self._get('/System/Info')
+
+    def list_libraries(self) -> List[Dict[str, Any]]:
+        """Jellyfin libraries and their folders (GET /Library/VirtualFolders, needs an admin API key).
+
+        Same shape as SettingsService.get_plex_libraries: id, title, type
+        ('movie', 'show' or Jellyfin's own collection type), type_label, locations.
+        """
+        libraries = []
+        for folder in self._get('/Library/VirtualFolders') or []:
+            kind = folder.get('CollectionType') or 'mixed'
+            libraries.append({
+                "id": folder.get('ItemId'),
+                "title": folder.get('Name', ''),
+                "type": _LIBRARY_TYPES.get(kind, kind),
+                "type_label": _LIBRARY_TYPE_LABELS.get(kind, kind.replace('tvshows', 'TV Shows').title()),
+                "locations": [loc for loc in folder.get('Locations') or [] if loc],
+                "server": "jellyfin",
+            })
+        return libraries
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        """Every Jellyfin user (GET /Users): id, name, is_admin, is_disabled."""
+        return [{
+            "id": user.get('Id'),
+            "name": user.get('Name', ''),
+            "is_admin": bool((user.get('Policy') or {}).get('IsAdministrator')),
+            "is_disabled": bool((user.get('Policy') or {}).get('IsDisabled')),
+        } for user in self._get('/Users') or []]
 
     def _users_to_fetch(self, purpose: str) -> Optional[List[Dict[str, Any]]]:
         """Enabled users minus jellyfin_skip_users. None if the user list can't be read."""

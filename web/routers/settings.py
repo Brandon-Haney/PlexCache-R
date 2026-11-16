@@ -71,6 +71,7 @@ def settings_index(request: Request):
             "page_title": "Settings",
             "active_tab": "plex",
             "settings": settings,
+            "jellyfin": settings_service.get_jellyfin_settings(),
         }
     )
 
@@ -85,9 +86,10 @@ def settings_plex(request: Request):
         request,
         "settings/plex.html",
         {
-            "page_title": "Plex Server Settings",
+            "page_title": "Media Server Settings",
             "active_tab": "plex",
             "settings": settings,
+            "jellyfin": settings_service.get_jellyfin_settings(),
         }
     )
 
@@ -182,15 +184,20 @@ def test_plex_connection(request: Request):
 
 @router.put("/plex", response_class=HTMLResponse)
 def save_plex_settings(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
-    """Save Plex Server connection settings (URL + token only)"""
+    """Save Plex Server connection settings (URL, token, and whether the run uses Plex)"""
     settings_service = get_settings_service()
 
     plex_url = form_data.get("plex_url", "")
     plex_token = form_data.get("plex_token", "")
+    use_plex = form_data.get("plex_enabled") == "true"
+
+    if not use_plex and not settings_service.media_servers_after(plex=False):
+        return _page_alert("error", "Plex is the only media server set up. Set up Jellyfin before switching Plex off.")
 
     success = settings_service.save_plex_settings({
         "plex_url": plex_url,
         "plex_token": plex_token,
+        "plex_enabled": use_plex,
     })
 
     if success:
@@ -211,6 +218,57 @@ def save_plex_settings(request: Request, form_data: ImmutableMultiDict = Depends
                 "message": "Failed to save settings"
             }
         )
+
+
+@router.put("/jellyfin", response_class=HTMLResponse)
+def save_jellyfin_settings(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
+    """Save the Jellyfin connection (URL, API key, whether the run uses it, favorites)"""
+    settings_service = get_settings_service()
+    use_jellyfin = form_data.get("jellyfin_enabled") == "true"
+    url = (form_data.get("jellyfin_url") or "").strip()
+    api_key = (form_data.get("jellyfin_api_key") or "").strip()
+
+    if use_jellyfin and not settings_service.jellyfin_client(url or None, api_key or None):
+        return _page_alert("error", "Enter the Jellyfin URL and API key to use Jellyfin.")
+    if not use_jellyfin and not settings_service.media_servers_after(jellyfin=False):
+        return _page_alert("error", "Jellyfin is the only media server in use. Switch Plex on before switching Jellyfin off.")
+
+    success = settings_service.save_jellyfin_settings({
+        "url": url,
+        "api_key": api_key,
+        "enabled": use_jellyfin,
+        "favorites_toggle": form_data.get("jellyfin_favorites_toggle") == "true",
+    })
+    if success:
+        return _page_alert("success", "Jellyfin settings saved")
+    return _page_alert("error", "Failed to save Jellyfin settings")
+
+
+@router.post("/jellyfin/test", response_class=HTMLResponse)
+def test_jellyfin_connection(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
+    """Test the Jellyfin URL and API key as typed (or as saved), so it works before saving"""
+    settings_service = get_settings_service()
+    url = (form_data.get("jellyfin_url") or "").strip() or None
+    api_key = (form_data.get("jellyfin_api_key") or "").strip() or None
+    client = settings_service.jellyfin_client(url, api_key)
+    if client is None:
+        return templates.TemplateResponse(
+            request, "partials/alert.html", {"type": "error", "message": "Enter the Jellyfin URL and API key."})
+    try:
+        info = client.get_server_info()
+        libraries = client.list_libraries()
+    except Exception as e:
+        message = getattr(getattr(e, "response", None), "status_code", None)
+        if message in (401, 403):
+            text = "Jellyfin refused the API key. Create one under Dashboard > API Keys."
+        else:
+            text = f"Could not reach Jellyfin at {client.url} ({type(e).__name__})"
+        return templates.TemplateResponse(request, "partials/alert.html", {"type": "error", "message": text})
+    name, version = info.get("ServerName", "Jellyfin"), info.get("Version", "")
+    return templates.TemplateResponse(
+        request, "partials/alert.html",
+        {"type": "success",
+         "message": f"Connected to '{name}' (Jellyfin {version}), {len(libraries)} libraries"})
 
 
 # =============================================================================

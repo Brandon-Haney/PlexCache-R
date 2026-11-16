@@ -32,11 +32,11 @@ from typing import Any, Dict, List
 # Icon vocabulary aligns with lucide icons already used elsewhere in the UI.
 # Tones map to the .result-icon.tone-* classes in custom.css.
 _INDEX: List[Dict[str, Any]] = [
-    # --- Plex Server -------------------------------------------------------
+    # --- Media Servers: Plex and Jellyfin -----------------------------------
     {
         "tab": "plex", "setting_id": "plex_url",
         "label": "Plex URL", "hint": "Base URL of your Plex Media Server.",
-        "section": "Plex Server", "subsection": "Server Connection",
+        "section": "Media Servers", "subsection": "Plex",
         "icon": "link", "tone": "",
         "keywords": ["plex", "url", "host", "address", "server", "32400", "ip"],
     },
@@ -44,7 +44,7 @@ _INDEX: List[Dict[str, Any]] = [
         "tab": "plex", "setting_id": "plex_token",
         "label": "Plex Token",
         "hint": "Auth token. Click \"Get Token\" to sign in with Plex.",
-        "section": "Plex Server", "subsection": "Server Connection",
+        "section": "Media Servers", "subsection": "Plex",
         "icon": "key", "tone": "tone-warn",
         "keywords": ["plex", "token", "auth", "authentication", "login", "oauth", "sign in", "api key", "credentials"],
     },
@@ -52,7 +52,7 @@ _INDEX: List[Dict[str, Any]] = [
         "tab": "plex", "setting_id": "plex_oauth_btn",
         "label": "Get Token (Sign in with Plex)",
         "hint": "Open the Plex OAuth flow and capture a token automatically.",
-        "section": "Plex Server", "subsection": "Server Connection",
+        "section": "Media Servers", "subsection": "Plex",
         "icon": "key", "tone": "tone-warn",
         "keywords": ["oauth", "sign in", "plex login", "get token", "auto"],
     },
@@ -60,9 +60,55 @@ _INDEX: List[Dict[str, Any]] = [
         "tab": "plex", "setting_id": "plex_test",
         "label": "Test Plex Connection",
         "hint": "Verify the URL + token can reach your Plex server.",
-        "section": "Plex Server", "subsection": "Server Connection",
+        "section": "Media Servers", "subsection": "Plex",
         "icon": "plug", "tone": "tone-info",
         "keywords": ["test", "verify", "ping", "connection", "check"],
+    },
+    {
+        "tab": "plex", "setting_id": "plex_enabled",
+        "label": "Use Plex",
+        "hint": "Switch Plex off to use Jellyfin on its own. Its settings are kept.",
+        "section": "Media Servers", "subsection": "Plex",
+        "icon": "power", "tone": "",
+        "keywords": ["plex", "enable", "disable", "switch off", "jellyfin only", "media server"],
+    },
+    {
+        "tab": "plex", "setting_id": "jellyfin_enabled",
+        "label": "Use Jellyfin",
+        "hint": "Use Jellyfin on its own or next to Plex.",
+        "section": "Media Servers", "subsection": "Jellyfin",
+        "icon": "server", "tone": "tone-purple",
+        "keywords": ["jellyfin", "enable", "media server", "continue watching", "next up"],
+    },
+    {
+        "tab": "plex", "setting_id": "jellyfin_url",
+        "label": "Jellyfin URL", "hint": "Address of your Jellyfin server, e.g. http://192.168.1.10:8096.",
+        "section": "Media Servers", "subsection": "Jellyfin",
+        "icon": "link", "tone": "tone-purple",
+        "keywords": ["jellyfin", "url", "host", "address", "server", "8096", "ip"],
+    },
+    {
+        "tab": "plex", "setting_id": "jellyfin_api_key",
+        "label": "Jellyfin API Key", "hint": "Create one in Jellyfin under Dashboard > API Keys.",
+        "section": "Media Servers", "subsection": "Jellyfin",
+        "icon": "key", "tone": "tone-warn",
+        "keywords": ["jellyfin", "api key", "token", "auth", "credentials"],
+    },
+    {
+        "tab": "plex", "setting_id": "jellyfin_favorites_toggle",
+        "label": "Jellyfin Favorites as Watchlist",
+        "hint": "Cache unplayed Jellyfin favorites like a watchlist.",
+        "section": "Media Servers", "subsection": "Jellyfin",
+        "icon": "heart", "tone": "tone-purple",
+        "keywords": ["jellyfin", "favorites", "favourites", "watchlist"],
+    },
+    {
+        "tab": "plex", "setting_id": "jellyfin_test",
+        "label": "Test Jellyfin Connection",
+        "hint": "Check the URL and API key reach your Jellyfin server.",
+        "section": "Media Servers", "subsection": "Jellyfin",
+        "icon": "plug", "tone": "tone-info",
+        "keywords": ["jellyfin", "test", "verify", "connection", "check"],
     },
 
     # --- Libraries --------------------------------------------------------

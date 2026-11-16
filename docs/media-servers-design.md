@@ -1,6 +1,6 @@
 # Media servers: Plex, Jellyfin, or both
 
-**Status:** design agreed, phase 1 not started.
+**Status:** phase 1 in progress (see the checklist under Phases).
 **Branch:** `feature/media-servers` on Brandon-Haney/PlexCache-R, cut from upstream `main` at v3.3.0 (`e426fa9`).
 **To review with:** StudioNirin (owner), RogerSik (wrote the Jellyfin source in #234).
 
@@ -114,11 +114,12 @@ class MediaServer(Protocol):
 
 Today a `PathMapping` (`core/config.py:44-72`) has one `plex_path`. Jellyfin paths reach it through `jellyfin_path_mappings`, so a Jellyfin path takes two hops to a real path: Jellyfin → Plex → real.
 
-- **New fields:** `jellyfin_path` and `jellyfin_library_id` on `PathMapping`. `plex_path` and `section_id` stay. A mapping applies to a server when that server's path is set, so a Jellyfin-only mapping has an empty `plex_path`.
-- **Conversion:** `MultiPathModifier` (`core/file_operations.py:2804-3035`) converts per server: `to_real(path, server)` and back.
-- **Migration** (one-time, marker in `data/migrations.json` as in #202, settings backed up first):
-  - Each `jellyfin_path_mappings` entry (Jellyfin prefix → Plex prefix) is folded into the mappings whose `plex_path` starts with that Plex prefix, as `jellyfin_path = jellyfin_prefix + rest`.
-  - Entries that line up with no mapping are kept and logged.
+- **New fields:** `jellyfin_path` and `jellyfin_library_id` on `PathMapping`. `plex_path` and `section_id` stay. A library only Jellyfin has gets a mapping with an empty `plex_path`.
+- **Conversion (done, `babe0cd`):** the run builds Jellyfin's translation from the enabled mappings (`PlexCacheApp._jellyfin_paths`). A Jellyfin path under `jellyfin_path` becomes the mapping's **`plex_path` when it has one**, so a file both servers report keeps one tracker entry, exactly as with `jellyfin_path_mappings` today; **otherwise its `real_path`**. `MultiPathModifier.convert_plex_to_real` already passes real paths through unchanged, so nothing downstream needed a per-server conversion.
+  - This replaced the earlier plan of a per-server `to_real(path, server)`. It needs no change to `MultiPathModifier` and no tracker migration.
+  - `jellyfin_path_mappings` still applies; a mapping's own `jellyfin_path` wins for the same prefix. Folders of disabled mappings are skipped without the "unmapped path" notice.
+  - Web UI mapping edits keep `section_id`, `jellyfin_path` and `jellyfin_library_id` (`SettingsService.KEPT_MAPPING_FIELDS`).
+- **Migration (with the Libraries screen):** each `jellyfin_path_mappings` entry (Jellyfin prefix → Plex prefix) folds into the mappings whose `plex_path` starts with that Plex prefix, as `jellyfin_path = jellyfin_prefix + rest`. Entries that line up with no mapping are kept and logged. One-time, marker in `data/migrations.json` as in #202, settings backed up first. Not needed for the run itself, since both forms work side by side; it's for showing one list in the UI.
 - **Library toggles:** Jellyfin's library list (`/Library/VirtualFolders`: name, `ItemId`, `CollectionType`, `Locations`) feeds setup and the Libraries tab, the way Plex sections do. Jellyfin items whose path falls in a disabled mapping are skipped. That gives Jellyfin the library filter it doesn't have today.
 
 ### 5. IDs and trackers
@@ -128,10 +129,8 @@ Today a `PathMapping` (`core/config.py:44-72`) has one `plex_path`. Jellyfin pat
   - The pin tracker is keyed by rating key, and `plex_server.fetchItem(int(rk))` (`:296`) raises `ValueError` for a non-numeric ID. With `prune=True` that **deletes the pin** (`:310-316`).
   - Fix this first: resolve each pin through its own server, and never prune a pin whose server isn't connected or whose ID it can't read.
   - Pin keys become `"<source>:<id>"`, and existing keys are read as Plex.
-- **Watchlist tracker:** keyed by **Plex path** (`core/app.py:1606`, `core/file_operations.py:1462-1472`). It is re-keyed by **real path**, like the OnDeck tracker, so both servers share it.
-  - The migration converts keys with the current path mappings and keeps any it can't convert.
-  - The trackers' file-name fallback (`core/file_operations.py:345-378`) still finds entries during the change.
-  - Readers that build the Plex-path form change with it: Recently Added (`web/services/recently_added_service.py:311`) and the upgrade check (`web/services/cache_service.py:2184-2187`).
+- **Watchlist tracker:** keyed by **Plex path** (`core/app.py:1606`, `core/file_operations.py:1462-1472`). **No re-key in phase 1.** With section 4's conversion, a file keeps its Plex path whenever its mapping has one, so both servers still share entries; only a Jellyfin-only library's entries are keyed by real path, and nothing Plex-only reads those.
+  - A real-path re-key stays possible later (the migration would convert keys with the current mappings and keep any it can't convert). The readers that build the Plex-path form would change with it: Recently Added (`web/services/recently_added_service.py:311`) and the upgrade check (`web/services/cache_service.py:2184-2187`).
 - **Timestamps:** already carry `rating_key`, `media_type` and `source`, so they need no change.
 
 ### 6. Users
@@ -175,14 +174,14 @@ Until phase 2, when Plex isn't enabled these pages say they need Plex instead of
 
 ### Phase 1: Jellyfin-only installs work
 
-- [ ] `core/media_server.py`: shared types, the `MediaServer` interface, and the next-episode helper. `core/jellyfin_api.py` stops importing `core.plex_api`.
-- [ ] Plex adapter around `PlexManager`, with no behaviour change, and a Jellyfin adapter.
-- [ ] `PlexCacheApp` loops over the enabled servers: connect, sessions, OnDeck, watchlist and completeness. With one of two servers down, it caches from the other and skips move-back.
-- [ ] Config: `plex_enabled` / `jellyfin_enabled`, at least one server, Plex-only fields required only for Plex, and `is_setup_complete()`.
-- [ ] Path mappings: `jellyfin_path` and `jellyfin_library_id`, per-server conversion in `MultiPathModifier`, and migration of `jellyfin_path_mappings`.
+- [x] Pins: never pruned for an ID the server can't read; pins of another server are skipped by the Plex resolver (`8ed7ef6`). Ship this early, on its own.
+- [x] `core/media_server.py`: shared types and the `MediaServer` interface; Plex and Jellyfin adapters with no behaviour change, checked by a differential run against the previous commit (`fadc88d`).
+- [x] `PlexCacheApp` loops over the servers for sessions, OnDeck, the watchlist and the move-back checks (`fadc88d`).
+- [ ] Still open from the interface: the shared next-episode helper (`core/jellyfin_api.py` still imports `core.plex_api` for it); connecting through the interface; the one-server-down rule (open question 2).
+- [x] Config: `plex_enabled` / `jellyfin_enabled`, at least one server, Plex-only fields required only for Plex, and setup completeness (`setup_has_media_server`); without Plex the run builds no Plex client and leaves pins alone (`b549a3a`).
+- [x] Path mappings: `jellyfin_path` and `jellyfin_library_id`, Jellyfin paths to the mapping's Plex or real path (`babe0cd`).
+- [ ] Migration of `jellyfin_path_mappings` into the mappings, with the Libraries screen.
 - [ ] Jellyfin library list (`/Library/VirtualFolders`) and library toggles.
-- [ ] Watchlist tracker re-keyed by real path, with its migration.
-- [ ] Pins: never pruned for an ID the server can't read, or while the server is disconnected. Ship this early, on its own.
 - [ ] Setup wizard steps 2 to 4 for Jellyfin, plus Settings: the Media Servers tab, Libraries and Users grouped by server, and settings search entries.
 - [ ] "Needs Plex" states for Recently Added, pins, the duplicate scan and the upgrade check.
 - [ ] Tests:

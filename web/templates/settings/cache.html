@@ -135,7 +135,8 @@
                            value="{{ '%g' % (settings.watchlist_retention_days | default(0) | float) }}" min="0" max="365" step="0.5">
                     <div class="form-hint">Stop caching a watchlist item this long after it was added in Plex,
                         even if it is still on the watchlist. Counted from the Plex date, not from when
-                        PlexCache cached it (0 = never).</div>
+                        PlexCache cached it (0 = never). Jellyfin favorites have no date, so they count
+                        from the first run that sees them.</div>
                 </div>
             </div>
 
@@ -196,9 +197,9 @@
                     <span>Create Symlinks After Caching</span>
                 </label>
                 <div class="form-hint">For non-Unraid systems: creates a symlink at the original file
-                location pointing to the cached copy, so Plex can still find files. Not needed on Unraid
+                location pointing to the cached copy, so your media server can still find files. Not needed on Unraid
                 or mergerfs (FUSE handles this). In Docker, both paths must be mounted at the same absolute
-                paths in PlexCache-D and Plex containers.</div>
+                paths in PlexCache-D and the media server containers.</div>
             </div>
 
             <div class="form-group" data-setting-id="auto_transfer_upgrades">
@@ -207,7 +208,7 @@
                            {% if settings.auto_transfer_upgrades | default(true) %}checked{% endif %}>
                     <span>Auto-Transfer Tracking on Media Upgrades</span>
                 </label>
-                <div class="form-hint">When Sonarr/Radarr upgrades a cached file, automatically transfer exclude list and tracker entries to the new file using Plex rating keys.</div>
+                <div class="form-hint">When Sonarr/Radarr upgrades a cached file, automatically transfer exclude list and tracker entries to the new file using Plex rating keys. Plex libraries only: Jellyfin gives a replaced file a new id.</div>
             </div>
 
             <div class="form-group" data-setting-id="backup_upgraded_files">
@@ -415,9 +416,9 @@
                 <label class="switch">
                     <input type="checkbox" name="exit_if_active_session"
                            {% if settings.exit_if_active_session %}checked{% endif %}>
-                    <span>Skip Run if Plex Has Active Playback</span>
+                    <span>Skip Run if a Media Server Has Active Playback</span>
                 </label>
-                <div class="form-hint">Exit without processing if someone is currently watching. Prevents moving files during playback.</div>
+                <div class="form-hint">Exit without processing if someone is currently watching on Plex or Jellyfin. Prevents moving files during playback.</div>
             </div>
 
             <div class="grid grid-2">

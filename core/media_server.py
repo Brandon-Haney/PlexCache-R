@@ -85,6 +85,71 @@ class MediaServer(Protocol):
     def is_watchlist_complete(self) -> bool: ...
 
 
+def next_episodes_after(episodes: List[Any], current_season: int, current_episode_index: int,
+                    number_episodes: int, prefetch_minimum_minutes: int = 0) -> List[Any]:
+    """Get the next episodes after the current one, for Plex and Jellyfin alike.
+
+    Episodes are any objects with plexapi's attribute names: parentIndex
+    (season), index (episode), duration (ms), title and grandparentTitle.
+
+    `number_episodes` is the minimum number of episodes to return. When
+    `prefetch_minimum_minutes` > 0, additional episodes are appended until
+    their summed runtime meets or exceeds that target. Episodes missing
+    duration metadata are weighted with the running average of episodes
+    already collected (or a 45-minute fallback when no data is available
+    yet) — biased toward fetching one too many rather than too few.
+    """
+    next_episodes: List[Any] = []
+    total_minutes = 0.0
+    duration_sum = 0.0
+    duration_count = 0
+    # Used when no prior episode has duration metadata yet.
+    FALLBACK_MINUTES = 45.0
+
+    def _minutes_from_ms(d_ms) -> float:
+        # Plex stores duration in milliseconds. Fall back to the running
+        # average when the metadata is missing, or to FALLBACK_MINUTES when
+        # no real duration has been seen yet.
+        if d_ms and d_ms > 0:
+            return d_ms / 60000.0
+        if duration_count > 0:
+            return duration_sum / duration_count
+        return FALLBACK_MINUTES
+
+    def _target_met() -> bool:
+        return (len(next_episodes) >= number_episodes
+                and total_minutes >= prefetch_minimum_minutes)
+
+    for episode in episodes:
+        # Skip episodes with missing index data
+        if episode.parentIndex is None or episode.index is None:
+            logging.debug(f"Skipping episode '{episode.title}' from '{episode.grandparentTitle}' - missing index data (parentIndex={episode.parentIndex}, index={episode.index})")
+            continue
+        if not (episode.parentIndex > current_season or
+                (episode.parentIndex == current_season and episode.index > current_episode_index)):
+            continue
+        if _target_met():
+            break
+        d_ms = getattr(episode, 'duration', None)
+        ep_minutes = _minutes_from_ms(d_ms)
+        next_episodes.append(episode)
+        total_minutes += ep_minutes
+        if d_ms and d_ms > 0:
+            duration_sum += d_ms / 60000.0
+            duration_count += 1
+        if _target_met():
+            break
+    if prefetch_minimum_minutes > 0:
+        show_name = getattr(next_episodes[0], 'grandparentTitle', '?') if next_episodes else '?'
+        logging.debug(
+            f"Prefetch buffer for {show_name!r}: {len(next_episodes)} eps, "
+            f"total {total_minutes:.1f} min "
+            f"(min count={number_episodes}, min runtime={prefetch_minimum_minutes} min, "
+            f"real durations seen={duration_count})"
+        )
+    return next_episodes
+
+
 def complete_watchlist_sources(incomplete: Sequence[str]) -> set:
     """Servers whose watchlist this run is complete, so a missing item really dropped off.
 

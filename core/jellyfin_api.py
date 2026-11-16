@@ -12,8 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from core.media_server import ActiveSessions, OnDeckItem, WatchlistItem  # noqa: F401 (re-exported)
-from core.plex_api import PlexManager
+from core.media_server import ActiveSessions, OnDeckItem, WatchlistItem, next_episodes_after  # noqa: F401 (re-exported)
 
 REQUEST_TIMEOUT = 30
 ITEM_FIELDS = "Path,MediaSources"
@@ -300,7 +299,7 @@ class JellyfinManager:
                             duration=(e.get('RunTimeTicks') or 0) // TICKS_PER_MS, item=e)
             for e in episodes
         ]
-        next_episodes = PlexManager._get_next_episodes(
+        next_episodes = next_episodes_after(
             candidates, season, episode, number_episodes,
             prefetch_minimum_minutes=prefetch_minimum_minutes)
         for next_episode in next_episodes:

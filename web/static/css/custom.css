@@ -2485,3 +2485,14 @@ article nav ul li a[aria-current="page"] {
     border-radius: var(--plex-radius-sm);
 }
 .jellyfin-edit-mapping__name { font-weight: 600; margin-bottom: 0.5rem; }
+
+/* Settings > Users: Jellyfin users (settings/partials/jellyfin_users.html) */
+.jellyfin-user-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+    gap: 0.6rem 1.25rem;
+}
+.jellyfin-user { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+.jellyfin-user .badge { font-size: 0.7rem; }
+.jellyfin-user.is-disabled { opacity: 0.6; }
+.jellyfin-user__note { font-size: 0.75rem; }

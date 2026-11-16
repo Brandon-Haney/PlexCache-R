@@ -153,6 +153,46 @@ def test_cards_and_a_jellyfin_that_cant_be_reached(make_client):
     assert "Couldn't reach Jellyfin" in page and "ConnectTimeout" in page and "retry=true" in page
 
 
+USERS = [
+    {"id": "u1", "name": "roger", "is_admin": True, "is_disabled": False},
+    {"id": "u2", "name": "mia", "is_admin": False, "is_disabled": False},
+    {"id": "u3", "name": "old", "is_admin": False, "is_disabled": True},
+]
+
+
+def test_jellyfin_users_are_cached_unless_skipped(make_client, monkeypatch):
+    monkeypatch.delenv("JELLYFIN_SKIP_USERS", raising=False)
+    client, svc = make_client([MOVIES_PLEX])
+    with patch.object(svc, "get_jellyfin_users", return_value={"items": USERS, "error": None}):
+        assert "Jellyfin users saved" in client.put("/settings/jellyfin/users", data={"cached_user": ["roger"]}).text
+        assert svc._load_raw()["jellyfin_skip_users"] == ["mia"]  # the disabled user isn't listed
+        rows = {u["name"]: u["cached"] for u in svc.jellyfin_user_rows()["users"]}
+        page = client.get("/settings/users/jellyfin").text
+    assert rows == {"roger": True, "mia": False, "old": False}
+    assert 'value="roger"' in page and "disabled in Jellyfin" in page
+
+
+def test_the_skip_env_var_wins(make_client, monkeypatch):
+    monkeypatch.setenv("JELLYFIN_SKIP_USERS", "roger")
+    client, svc = make_client([MOVIES_PLEX])
+    with patch.object(svc, "get_jellyfin_users", return_value={"items": USERS, "error": None}):
+        rows = svc.jellyfin_user_rows()
+        page = client.get("/settings/users/jellyfin").text
+    assert rows["skip_from_env"] and {u["name"]: u["cached"] for u in rows["users"]}["roger"] is False
+    assert "JELLYFIN_SKIP_USERS" in page
+
+
+def test_users_page_shows_the_servers_in_use(make_client):
+    client, svc = make_client([MOVIES_PLEX])
+    page = client.get("/settings/users").text
+    assert 'hx-put="/settings/users"' in page and 'hx-get="/settings/users/jellyfin"' in page
+    raw = svc._load_raw()
+    raw.update(PLEX_URL="", PLEX_TOKEN="")
+    svc._save_raw(raw)
+    page = client.get("/settings/users").text
+    assert 'hx-put="/settings/users"' not in page and 'hx-get="/settings/users/jellyfin"' in page
+
+
 def test_the_run_skips_a_switched_off_jellyfin_library():
     from core.app import PlexCacheApp
     from core.config import JellyfinConfig, PathMapping

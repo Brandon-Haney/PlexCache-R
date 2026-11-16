@@ -1,6 +1,7 @@
 {% extends "settings/index.html" %}
 
 {% block settings_content %}
+{% if plex_on %}
 <form hx-put="/settings/users" hx-target="#settings-alert-container" hx-swap="innerHTML">
 
 <!-- Multi-User Toggle Card -->
@@ -162,6 +163,36 @@
 </div>
 
 </form>
+{% endif %}
+
+{% if jellyfin_on %}
+<form hx-put="/settings/jellyfin/users" hx-target="#settings-alert-container" hx-swap="innerHTML">
+<div class="card" data-setting-id="jellyfin_users">
+    <div class="card-header">
+        <i data-lucide="server"></i>
+        <h2>Jellyfin Users</h2>
+    </div>
+    <div class="card-body">
+        <div class="form-hint mb-1">Whose Continue Watching, Next Up{% if jellyfin_favorites %} and favorites{% endif %} are cached. Jellyfin needs no per-user tokens: the API key reads every user.</div>
+        <div id="jellyfin-users-container"
+             hx-get="/settings/users/jellyfin"
+             hx-trigger="load"
+             hx-target="this"
+             hx-swap="innerHTML">
+            {% include "settings/partials/users_skeleton.html" %}
+        </div>
+    </div>
+</div>
+<div class="card">
+    <div class="card-body" style="padding: 1rem 1.25rem;">
+        <button type="submit" class="btn btn-primary">
+            <i data-lucide="save"></i>
+            Save Jellyfin Users
+        </button>
+    </div>
+</div>
+</form>
+{% endif %}
 
 <style>
 .htmx-indicator { display: none; }

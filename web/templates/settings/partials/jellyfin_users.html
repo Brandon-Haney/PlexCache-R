@@ -1,0 +1,37 @@
+{# Jellyfin users on Settings > Users, loaded by GET /settings/users/jellyfin.
+   Unticked users go into jellyfin_skip_users. #}
+{% if error %}
+<div class="alert alert-warning library-stale-note" role="status">
+    <i data-lucide="cloud-off"></i>
+    <div class="library-stale-note__text">
+        <strong>Couldn't reach Jellyfin</strong>, so its users can't be shown. Check the
+        <a href="/settings/plex">Jellyfin connection</a>.
+        <div class="library-stale-note__why">{{ error }}</div>
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary"
+            hx-get="/settings/users/jellyfin?retry=true"
+            hx-target="#jellyfin-users-container"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this">
+        <i data-lucide="refresh-cw"></i> Retry
+    </button>
+</div>
+{% else %}
+{% if skip_from_env %}
+<div class="form-hint mb-1">The container's JELLYFIN_SKIP_USERS variable decides who is skipped, so these can't be changed here.</div>
+{% endif %}
+<div class="jellyfin-user-list">
+    {% for user in users %}
+    <label class="switch jellyfin-user{% if user.is_disabled %} is-disabled{% endif %}">
+        <input type="checkbox" name="cached_user" value="{{ user.name }}"
+               {% if user.cached %}checked{% endif %}
+               {% if user.is_disabled or skip_from_env %}disabled{% endif %}>
+        <span>{{ user.name }}</span>
+        {% if user.is_admin %}<span class="badge badge-muted">Admin</span>{% endif %}
+        {% if user.is_disabled %}<span class="text-muted jellyfin-user__note">disabled in Jellyfin</span>{% endif %}
+    </label>
+    {% else %}
+    <p class="text-muted mb-0">Jellyfin has no users.</p>
+    {% endfor %}
+</div>
+{% endif %}

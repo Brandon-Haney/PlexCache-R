@@ -95,6 +95,19 @@ def test_jellyfin_paths_reach_the_real_files():
                                                  "/mnt/user/anime/Show/S01E01.mkv"]
 
 
+@pytest.mark.critical
+def test_a_jellyfin_only_mapping_never_catches_plex_paths():
+    """An empty plex_path would match every path ("".startswith), so an unmapped
+    Plex path would get the Jellyfin library's real path glued on the front."""
+    modifier = MultiPathModifier([MOVIES, ANIME])
+    assert modifier.convert_plex_to_real("/data/tv/Show/e1.mkv") == ("/data/tv/Show/e1.mkv", None)
+    assert modifier.modify_file_paths(["/data/tv/Show/e1.mkv"]) == ["/data/tv/Show/e1.mkv"]
+    assert modifier.get_mapping_for_path("/data/tv/Show/e1.mkv") is None
+    assert modifier.get_mapping_for_path("/mnt/user/anime/Show/e1.mkv") is ANIME
+    disabled = PathMapping(name="Old", plex_path="", real_path="/mnt/user/old/", enabled=False)
+    MultiPathModifier([MOVIES, disabled]).modify_file_paths(["/data/tv/e1.mkv"])  # no disabled-skip count
+
+
 def test_a_disabled_library_is_skipped_quietly(caplog):
     manager = _manager({}, skipped=["/media/kids"])
     with caplog.at_level(logging.INFO):

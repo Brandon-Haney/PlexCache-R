@@ -113,8 +113,10 @@ class TestPathTranslation:
             m._item_paths({"Path": "/other/Movies/a.mkv"})
         infos = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
         assert infos == [
-            "[JELLYFIN] Skipping unmapped path /other/TV/ - add it to jellyfin_path_mappings",
-            "[JELLYFIN] Skipping unmapped path /other/Movies/ - add it to jellyfin_path_mappings",
+            "[JELLYFIN] Skipping unmapped path /other/TV/ - set it as the Jellyfin path "
+            "of a path mapping (jellyfin_path), or add it to jellyfin_path_mappings",
+            "[JELLYFIN] Skipping unmapped path /other/Movies/ - set it as the Jellyfin path "
+            "of a path mapping (jellyfin_path), or add it to jellyfin_path_mappings",
         ]
 
     def test_auth_header(self):

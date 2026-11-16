@@ -68,6 +68,11 @@ class PathMapping:
     cacheable: bool = True
     enabled: bool = True
     section_id: Optional[int] = None  # Plex library section ID (links mapping to library)
+    # Jellyfin's path for the same folder, and its Jellyfin library. Jellyfin paths
+    # under jellyfin_path become this mapping's plex_path (shared with Plex), or
+    # its real_path for a library only Jellyfin has.
+    jellyfin_path: str = ""
+    jellyfin_library_id: Optional[str] = None
 
 
 @dataclass
@@ -778,7 +783,9 @@ class ConfigManager:
                 host_cache_path=host_cache_path,
                 cacheable=mapping_data.get('cacheable', True),
                 enabled=mapping_data.get('enabled', True),
-                section_id=mapping_data.get('section_id')
+                section_id=mapping_data.get('section_id'),
+                jellyfin_path=(mapping_data.get('jellyfin_path') or '').strip(),
+                jellyfin_library_id=mapping_data.get('jellyfin_library_id'),
             )
             self.paths.path_mappings.append(mapping)
             if host_cache_path and host_cache_path != cache_path:

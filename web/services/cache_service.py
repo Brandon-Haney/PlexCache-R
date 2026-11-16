@@ -2045,6 +2045,14 @@ class CacheService:
         if not candidates:
             return result
 
+        # Only Plex keeps an item's key across a file swap; Jellyfin gives the
+        # new file a new id, so its entries carry no rating_key and never get
+        # here. With Plex switched off there's nothing to ask.
+        from core.config import plex_enabled
+        if not plex_enabled(settings):
+            logger.debug("Upgrade check skipped: Plex is not in use")
+            return result
+
         # Connect to Plex once for all candidates
         plex_url = settings.get('plex_url', '') or settings.get('PLEX_URL', '')
         plex_token = settings.get('plex_token', '') or settings.get('PLEX_TOKEN', '')

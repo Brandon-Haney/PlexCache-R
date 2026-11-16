@@ -388,7 +388,8 @@ def detailed_status():
     cache_service = get_cache_service()
 
     # Get various status info
-    plex_connected = settings_service.check_plex_connection()
+    media_servers = settings_service.media_server_status()
+    plex_connected = next((s["connected"] for s in media_servers if s["key"] == "plex"), False)
     schedule_status = scheduler_service.get_status()
     operation_status = operation_runner.get_status_dict()
     cache_stats = cache_service.get_cache_stats()
@@ -398,6 +399,7 @@ def detailed_status():
         "plex": {
             "connected": plex_connected,
         },
+        "media_servers": {s["key"]: {"connected": s["connected"]} for s in media_servers},
         "scheduler": {
             "enabled": schedule_status.get("enabled", False),
             "running": schedule_status.get("running", False),

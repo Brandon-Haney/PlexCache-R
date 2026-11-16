@@ -1290,6 +1290,30 @@ class SettingsService:
 
         return self._save_raw(raw)
 
+    def check_jellyfin_connection(self) -> bool:
+        """Check that Jellyfin answers with the saved URL and API key (5s, for the dashboard)."""
+        saved = self.get_jellyfin_settings()
+        url, api_key = normalize_jellyfin_url(saved["url"]), saved["api_key"].strip()
+        if not url or not api_key:
+            return False
+        try:
+            import requests
+            response = requests.get(f"{url}/System/Info", timeout=5,
+                                    headers={"Authorization": f'MediaBrowser Client="PlexCache-D", Token="{api_key}"'})
+            return response.status_code == 200
+        except (requests.RequestException, OSError):
+            return False
+
+    def media_server_status(self) -> List[Dict[str, Any]]:
+        """The media servers in use, Plex first, each with whether it answers: [{key, label, connected}]."""
+        raw = self._load_raw()
+        status = []
+        if plex_enabled(raw) and str(raw.get("PLEX_URL", "")).strip():
+            status.append({"key": "plex", "label": "Plex", "connected": self.check_plex_connection()})
+        if jellyfin_configured(raw):
+            status.append({"key": "jellyfin", "label": "Jellyfin", "connected": self.check_jellyfin_connection()})
+        return status
+
     def check_plex_connection(self) -> bool:
         """Check if Plex server is reachable"""
         settings = self.get_plex_settings()

@@ -138,7 +138,14 @@
         </div>
     </div>
     {% endif %}
-    <div class="mt-1" style="text-align: center;">
+    <div class="mt-1 media-server-badges" style="text-align: center;">
+        {# One badge per media server in use (stats.media_servers); before that list existed, Plex only #}
+        {% for server in stats.media_servers or [] %}
+        <span class="badge {{ 'badge-success' if server.connected else 'badge-warning' }}">
+            <i data-lucide="{{ 'plug' if server.connected else 'plug-off' }}"></i>
+            {{ server.label }} {{ 'Connected' if server.connected else 'Not Connected' }}
+        </span>
+        {% else %}
         {% if stats.plex_connected %}
         <span class="badge badge-success">
             <i data-lucide="plug"></i>
@@ -150,5 +157,6 @@
             Plex Not Connected
         </span>
         {% endif %}
+        {% endfor %}
     </div>
 </a>

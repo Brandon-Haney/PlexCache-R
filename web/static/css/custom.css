@@ -2505,3 +2505,11 @@ footer {
 .jellyfin-user .badge { font-size: 0.7rem; }
 .jellyfin-user.is-disabled { opacity: 0.6; }
 .jellyfin-user__note { font-size: 0.75rem; }
+
+/* Dashboard status card: one badge per media server in use (partials/dashboard_stats.html) */
+.media-server-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.375rem;
+}

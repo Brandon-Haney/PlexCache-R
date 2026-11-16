@@ -1,0 +1,46 @@
+{% extends "setup/base_setup.html" %}
+
+{# Step 4 when Jellyfin is the media server: whose Continue Watching and Next Up
+   are cached. Unticked users are saved as jellyfin_skip_users. #}
+{% block content %}
+<form action="/setup/step4" method="post">
+    <div class="setup-content">
+        <h2>Jellyfin Users</h2>
+        <p class="description">
+            Choose whose Continue Watching and Next Up to cache. Jellyfin needs no per-user tokens:
+            the API key reads every user. You can change this later under Settings &gt; Users.
+        </p>
+
+        {% if not jellyfin_users %}
+        <div class="alert alert-error">
+            <i data-lucide="alert-circle"></i>
+            <span>Could not fetch users from Jellyfin. Please check your connection.</span>
+        </div>
+        {% else %}
+        <div class="checkbox-group">
+            {% for user in jellyfin_users %}
+            <label class="checkbox-item">
+                <input type="checkbox" name="cached_user" value="{{ user.name }}"
+                       {% if user.cached %}checked{% endif %} {% if user.is_disabled %}disabled{% endif %}>
+                <div class="checkbox-label">
+                    <strong>{{ user.name }}</strong>
+                    <span>{% if user.is_disabled %}Disabled in Jellyfin{% elif user.is_admin %}Administrator{% else %}User{% endif %}</span>
+                </div>
+            </label>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="setup-footer">
+        <a href="/setup?step=3" class="btn btn-secondary">
+            <i data-lucide="arrow-left"></i>
+            Back
+        </a>
+        <button type="submit" class="btn btn-primary">
+            <span class="btn-text">Next</span>
+            <i data-lucide="arrow-right" class="btn-icon"></i>
+        </button>
+    </div>
+</form>
+{% endblock %}

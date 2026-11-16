@@ -67,11 +67,18 @@
             You can skip this and configure it later in Settings.
         </p>
 
+        {% if error %}
+        <div class="alert alert-error">
+            <i data-lucide="alert-circle"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
         <!-- Auth toggle -->
         <div class="security-toggle-row">
             <div>
                 <strong style="color: var(--plex-text);">Require Login</strong>
-                <div class="help-text" style="margin-top: 2px;">Only the Plex server owner can sign in to access the Web UI</div>
+                <div class="help-text" style="margin-top: 2px;">{% if server == 'jellyfin' %}Sign in with a username and password to access the Web UI{% else %}Only the Plex server owner can sign in to access the Web UI{% endif %}</div>
             </div>
             <label class="toggle-switch">
                 <input type="checkbox" id="auth_enabled" name="auth_enabled" value="on"
@@ -84,8 +91,9 @@
         <!-- Auth details (shown when enabled) -->
         <div id="auth-details" style="{% if not auth_enabled %}display: none;{% endif %}">
 
-            <!-- Admin identity -->
-            {% if admin_username %}
+            <!-- Admin identity (Plex sign-in only) -->
+            {% if server == 'jellyfin' %}
+            {% elif admin_username %}
             <div class="admin-identity-box">
                 <i data-lucide="user-check"></i>
                 <div>
@@ -122,19 +130,21 @@
                     <div>
                         <strong style="color: var(--plex-text); font-size: 0.95rem;">
                             <i data-lucide="key" style="width: 16px; height: 16px; vertical-align: middle; color: var(--plex-orange);"></i>
-                            Password Fallback
+                            {% if server == 'jellyfin' %}Username and Password{% else %}Password Fallback{% endif %}
                         </strong>
-                        <div class="help-text" style="margin-top: 2px;">Optional password login when Plex OAuth is unavailable</div>
+                        <div class="help-text" style="margin-top: 2px;">{% if server == 'jellyfin' %}Without Plex, this is how you sign in{% else %}Optional password login when Plex OAuth is unavailable{% endif %}</div>
                     </div>
+                    {% if server != 'jellyfin' %}
                     <label class="toggle-switch">
                         <input type="checkbox" id="auth_password_enabled" name="auth_password_enabled" value="on"
                                {% if auth_password_enabled %}checked{% endif %}
                                onchange="togglePasswordSectionSetup()">
                         <span class="toggle-slider"></span>
                     </label>
+                    {% endif %}
                 </div>
 
-                <div id="password-section" style="{% if not auth_password_enabled %}display: none;{% endif %} margin-top: 1rem;">
+                <div id="password-section" style="{% if not auth_password_enabled and server != 'jellyfin' %}display: none;{% endif %} margin-top: 1rem;">
                     <div class="password-fields">
                         <div class="form-group" style="margin-bottom: 0;">
                             <label for="auth_password_username">Username</label>

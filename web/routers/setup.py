@@ -4,6 +4,7 @@ import json
 import uuid
 import time
 import requests
+import os
 from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, Request, Form, Query
@@ -66,6 +67,40 @@ def get_or_create_client_id(settings: Dict) -> str:
     return str(uuid.uuid4())
 
 
+def _setup_server(request: Request) -> str:
+    """The media server this setup is for: ?server= on step 2 chooses, then the setup state remembers."""
+    chosen = request.query_params.get("server")
+    if chosen in ("plex", "jellyfin"):
+        return chosen
+    return _setup_state.get("_setup_server", "plex")
+
+
+def _jellyfin_step2_fields(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Jellyfin URL and API key for step 2, and whether the container's env vars already set them."""
+    url_env, key_env = os.environ.get("JELLYFIN_URL", ""), os.environ.get("JELLYFIN_API_KEY", "")
+    return {
+        "jellyfin_url": url_env or settings.get("jellyfin_url", ""),
+        "jellyfin_api_key": key_env or settings.get("jellyfin_api_key", ""),
+        "jellyfin_url_from_env": bool(url_env),
+        "jellyfin_api_key_from_env": bool(key_env),
+    }
+
+
+def _jellyfin_setup_client(url: str, api_key: str):
+    from core.config import normalize_jellyfin_url
+    from core.jellyfin_api import JellyfinManager
+    return JellyfinManager(normalize_jellyfin_url(url), api_key.strip())
+
+
+def _jellyfin_setup_fetch(settings: Dict[str, Any], what: str) -> List[Dict[str, Any]]:
+    """Jellyfin libraries or users for steps 3 and 4 (empty if Jellyfin can't be reached)."""
+    fields = _jellyfin_step2_fields(settings)
+    try:
+        return getattr(_jellyfin_setup_client(fields["jellyfin_url"], fields["jellyfin_api_key"]), what)()
+    except Exception:
+        return []
+
+
 @router.get("/setup", response_class=HTMLResponse)
 def setup_wizard(request: Request, step: int = 1):
     """Main setup wizard page"""
@@ -83,11 +118,33 @@ def setup_wizard(request: Request, step: int = 1):
         "settings": settings,
     }
 
+    # Which media server this setup is for: Plex (default), or Jellyfin on its own
+    server = _setup_server(request)
+    context["server"] = server
+
     # Add step-specific data
     if step == 2:
         # Plex connection - check for existing values
         context["plex_url"] = settings.get("PLEX_URL", "")
         context["plex_token"] = settings.get("PLEX_TOKEN", "")
+        context.update(_jellyfin_step2_fields(settings))
+
+    elif step == 3 and server == "jellyfin":
+        if "_cached_jellyfin_libraries" not in _setup_state:
+            _setup_state["_cached_jellyfin_libraries"] = _jellyfin_setup_fetch(settings, "list_libraries")
+        context["libraries"] = _setup_state["_cached_jellyfin_libraries"]
+        context["valid_sections"] = _setup_state.get("_jellyfin_selected", [])
+        context["library_cacheable"] = settings.get("library_cacheable", {})
+        context["cache_dir"] = settings.get("cache_dir", "/mnt/cache")
+        context["path_mappings"] = []
+
+    elif step == 4 and server == "jellyfin":
+        if "_cached_jellyfin_users" not in _setup_state:
+            _setup_state["_cached_jellyfin_users"] = _jellyfin_setup_fetch(settings, "list_users")
+        skipped = set(settings.get("jellyfin_skip_users", []) or [])
+        context["jellyfin_users"] = [{**u, "cached": u["name"] not in skipped and not u["is_disabled"]}
+                                     for u in _setup_state["_cached_jellyfin_users"]]
+        return templates.TemplateResponse(request, "setup/step4_jellyfin.html", context)
 
     elif step == 3:
         # Libraries - use cached data if available, otherwise fetch from Plex
@@ -150,9 +207,15 @@ def setup_wizard(request: Request, step: int = 1):
     elif step == 7:
         # Summary - gather all configured settings from setup state
         context["plex_url"] = settings.get("PLEX_URL", "")
-        context["libraries_count"] = len(settings.get("valid_sections", []))
+        context["libraries_count"] = (len(_setup_state.get("_jellyfin_selected", [])) if server == "jellyfin"
+                                      else len(settings.get("valid_sections", [])))
         context["path_mappings_count"] = len(settings.get("path_mappings", []))
         context["users_count"] = len(settings.get("users", [])) + 1  # +1 for main account
+        if server == "jellyfin":
+            skipped = set(settings.get("jellyfin_skip_users", []) or [])
+            context["users_count"] = sum(1 for u in _setup_state.get("_cached_jellyfin_users", [])
+                                         if not u["is_disabled"] and u["name"] not in skipped)
+            context["jellyfin_url"] = settings.get("jellyfin_url") or os.environ.get("JELLYFIN_URL", "")
         context["auth_enabled"] = settings.get("auth_enabled", False)
 
     return templates.TemplateResponse(request, f"setup/step{step}.html", context)
@@ -196,7 +259,9 @@ def setup_step2_post(
     update_setup_state({
         "PLEX_URL": plex_url,
         "PLEX_TOKEN": plex_token,
-        "plexcache_client_id": client_id
+        "plexcache_client_id": client_id,
+        "plex_enabled": True,
+        "_setup_server": "plex",
     })
 
     # Invalidate caches to force refresh with new credentials
@@ -214,9 +279,89 @@ def setup_step2_post(
     return RedirectResponse(url="/setup?step=3", status_code=303)
 
 
+@router.post("/setup/step2/jellyfin", response_class=HTMLResponse)
+def setup_step2_jellyfin_post(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
+    """Handle step 2 when Jellyfin is the media server (no Plex): check the connection, then remember it"""
+    from core.config import normalize_jellyfin_url
+    saved = _jellyfin_step2_fields({**get_settings_service().get_all(), **_setup_state})
+    url = (form_data.get("jellyfin_url") or "").strip() or saved["jellyfin_url"]
+    api_key = (form_data.get("jellyfin_api_key") or "").strip() or saved["jellyfin_api_key"]
+    error = None
+    if not url or not api_key:
+        error = "Enter the Jellyfin URL and API key."
+    else:
+        try:
+            client = _jellyfin_setup_client(url, api_key)
+            client.get_server_info()
+            libraries, users = client.list_libraries(), client.list_users()
+        except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            error = ("Jellyfin refused the API key. Create one under Dashboard > API Keys." if status in (401, 403)
+                     else f"Could not connect to Jellyfin at {normalize_jellyfin_url(url)} ({type(e).__name__})")
+    if error:
+        return templates.TemplateResponse(request, "setup/step2.html", {
+            "page_title": "Setup", "step": 2, "total_steps": 7, "server": "jellyfin", "error": error,
+            "plex_url": _setup_state.get("PLEX_URL", ""), "plex_token": _setup_state.get("PLEX_TOKEN", ""),
+            **saved, "jellyfin_url": url, "jellyfin_api_key": api_key,
+        })
+
+    update_setup_state({
+        "jellyfin_url": normalize_jellyfin_url(url) if not saved["jellyfin_url_from_env"] else saved["jellyfin_url"],
+        "jellyfin_api_key": api_key,
+        "jellyfin_enabled": True,
+        "plex_enabled": False,
+        "users_toggle": False,
+        "valid_sections": [],
+        "_setup_server": "jellyfin",
+        "_cached_jellyfin_libraries": libraries,
+        "_cached_jellyfin_users": users,
+    })
+    if saved["jellyfin_api_key_from_env"]:
+        _setup_state.pop("jellyfin_api_key", None)  # the env var wins; keep it out of the settings file
+    return RedirectResponse(url="/setup?step=3", status_code=303)
+
+
+def _jellyfin_setup_mappings(selected: List[str], library_cacheable: Dict[str, bool],
+                             cache_dir: str) -> List[Dict[str, Any]]:
+    """Path mappings for the Jellyfin libraries picked in step 3, guessed like Plex's (auto_fill_mapping)."""
+    settings_service = get_settings_service()
+    mappings = []
+    for library in _setup_state.get("_cached_jellyfin_libraries", []):
+        if library["id"] not in selected:
+            continue
+        cacheable = library_cacheable.get(library["id"], True)
+        for location in library.get("locations", []):
+            folder = location.strip().rstrip("/")
+            if not folder:
+                continue
+            guess = settings_service.auto_fill_mapping(library, folder, {"cache_dir": cache_dir})
+            mapping = {k: v for k, v in guess.items() if k not in ("plex_path", "section_id")}
+            mapping.update({
+                "plex_path": "", "jellyfin_path": folder, "jellyfin_library_id": library["id"],
+                "jellyfin_enabled": True, "cacheable": cacheable,
+            })
+            if not cacheable:
+                mapping["cache_path"] = mapping["host_cache_path"] = None
+            mappings.append(mapping)
+    return mappings
+
+
 @router.post("/setup/step3", response_class=HTMLResponse)
 def setup_step3_post(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
     """Handle step 3 (Libraries & Paths) form submission"""
+
+    if _setup_state.get("_setup_server") == "jellyfin":
+        cache_dir = form_data.get("cache_dir", "").strip() or "/mnt/cache"
+        selected = form_data.getlist("libraries")
+        library_cacheable = {lib_id: form_data.get(f"library_cacheable_{lib_id}") == "on" for lib_id in selected}
+        update_setup_state({
+            "_jellyfin_selected": selected,
+            "library_cacheable": library_cacheable,
+            "cache_dir": cache_dir,
+            "valid_sections": [],
+            "path_mappings": _jellyfin_setup_mappings(selected, library_cacheable, cache_dir),
+        })
+        return RedirectResponse(url="/setup?step=4", status_code=303)
 
     # Get cache_dir from form, default to standard Docker mount point
     cache_dir = form_data.get("cache_dir", "").strip() or "/mnt/cache"
@@ -319,6 +464,15 @@ def setup_step3_post(request: Request, form_data: ImmutableMultiDict = Depends(p
 @router.post("/setup/step4", response_class=HTMLResponse)
 def setup_step4_post(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
     """Handle step 4 (Users) form submission"""
+
+    if _setup_state.get("_setup_server") == "jellyfin":
+        cached = set(form_data.getlist("cached_user"))
+        users = _setup_state.get("_cached_jellyfin_users", [])
+        update_setup_state({
+            "users_toggle": False,
+            "jellyfin_skip_users": sorted(u["name"] for u in users if not u["is_disabled"] and u["name"] not in cached),
+        })
+        return RedirectResponse(url="/setup?step=5", status_code=303)
 
     users_toggle = form_data.get("users_toggle") == "on"
 
@@ -495,8 +649,19 @@ def setup_step6_post(request: Request, form_data: ImmutableMultiDict = Depends(p
             except Exception:
                 pass
 
-        # Password fallback — only save credentials when toggle is on
-        password_enabled = form_data.get("auth_password_enabled") == "on"
+        # Password fallback — only save credentials when toggle is on. Without
+        # Plex there's no Plex sign-in, so the password login is the login.
+        jellyfin_only = _setup_state.get("_setup_server") == "jellyfin"
+        password_enabled = form_data.get("auth_password_enabled") == "on" or jellyfin_only
+        if jellyfin_only and not (form_data.get("auth_password_username", "").strip()
+                                  and form_data.get("auth_password", "").strip()):
+            return templates.TemplateResponse(request, "setup/step6.html", {
+                "page_title": "Setup", "step": 6, "total_steps": 7, "server": "jellyfin",
+                "auth_enabled": True, "auth_password_enabled": True,
+                "auth_session_hours": auth_state["auth_session_hours"],
+                "auth_password_username": form_data.get("auth_password_username", ""),
+                "error": "Without Plex, login uses a username and password. Enter both, or switch Require Login off.",
+            })
         auth_state["auth_password_enabled"] = password_enabled
 
         if password_enabled:
@@ -520,9 +685,10 @@ def setup_complete_post(request: Request):
     """Handle setup completion - write all settings to disk"""
     settings_service = get_settings_service()
 
-    # Get existing settings and merge with setup state
+    # Get existing settings and merge with setup state. Keys starting with "_"
+    # (fetched library and user lists, the chosen server) are the wizard's own.
     settings = settings_service.get_all()
-    settings.update(_setup_state)
+    settings.update({key: value for key, value in _setup_state.items() if not key.startswith("_")})
 
     # Mark setup as complete
     settings["firststart"] = False

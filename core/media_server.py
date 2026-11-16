@@ -45,6 +45,69 @@ class OnDeckItem:
 WatchlistItem = Tuple[str, str, Optional[datetime], Optional[Dict[str, Any]], Optional[str], str]
 
 
+@dataclass
+class RecentlyAddedItem:
+    """Represents a recently-added library item with metadata.
+
+    Unlike OnDeck/Watchlist items, recently-added media is server-wide
+    (library-level), so there is no per-user ``username`` field. One item is
+    emitted per media item, describing its preferred version.
+
+    Attributes:
+        file_path: Path to the media file as the run uses it (a Plex path, or
+            a real path for a library only Jellyfin has).
+        rating_key: The server's id for the item (Plex rating key, Jellyfin
+            item id), for pin lookups and version grouping.
+        title: The item's own title — episode title for episodes, movie title
+            for movies. Use ``episode_info`` for show/season context.
+        media_type: "movie" or "episode".
+        added_at: When the item was added to the library (None if unavailable).
+        library_title: Display name of the source library section.
+        library_section_id: The library's id (Plex section id, Jellyfin library id).
+        size: File size in bytes for this part (0 if unavailable).
+        episode_info: For episodes, dict with 'show', 'season', 'episode' keys.
+        source: Media server that reported it ("plex" or "jellyfin").
+    """
+    file_path: str
+    rating_key: Optional[str] = None
+    title: str = ""
+    media_type: str = "movie"
+    added_at: Optional[datetime] = None
+    library_title: str = ""
+    library_section_id: Optional[Any] = None
+    size: int = 0
+    episode_info: Optional[Dict[str, any]] = None
+    # For episodes, the *show's* id. Stable identity for grouping — two
+    # distinct shows can share a title ("The Office" US and UK), and grouping
+    # on the display title merges them into one nonsense group.
+    show_rating_key: str = ""
+    # Every file behind this item, across all versions:
+    # [{file_path, size, is_preferred, label}]. ``file_path``/``size`` above
+    # describe the PREFERRED version only — the one PlexCache caches and pins.
+    version_files: List[Dict[str, any]] = field(default_factory=list)
+    source: str = "plex"
+
+
+@dataclass
+class RecentlyAddedResult:
+    """What a recently-added sweep found, and what it could not read.
+
+    A per-library fetch can fail on its own — a section that times out or 5xxes
+    while its neighbours answer. Returning only the items would make that
+    library indistinguishable from one that genuinely had nothing new, so the
+    page would state "Nothing added" about media it never managed to look at.
+
+    Attributes:
+        items: Recently-added items, newest first, one entry per item.
+        unreadable_libraries: Titles of libraries that were attempted and
+            failed. Empty on a clean sweep. A total failure — no library
+            readable at all — raises instead, since there is no partial
+            result to report.
+    """
+    items: List[RecentlyAddedItem] = field(default_factory=list)
+    unreadable_libraries: List[str] = field(default_factory=list)
+
+
 class ActiveSessions(NamedTuple):
     """Playback sessions on one server. count includes sessions whose path is unknown or unmapped."""
     count: int

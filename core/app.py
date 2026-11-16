@@ -29,7 +29,7 @@ from core.config import ConfigManager
 from core.logging_config import LoggingManager, reset_warning_error_flag
 from core.system_utils import SystemDetector, FileUtils, SingleInstanceLock, get_disk_usage, get_array_direct_path, detect_zfs, set_zfs_prefixes, format_bytes, create_dir_with_ownership, check_cache_share_alignment, cleanup_empty_parent_folders, resolve_cache_boundary, sweep_empty_folders
 from core.plex_api import PlexManager, OnDeckItem
-from core.jellyfin_api import JellyfinManager
+from core.jellyfin_api import JellyfinManager, jellyfin_path_table
 from core.media_server import JellyfinServer, MediaServer, PlexServer, complete_watchlist_sources
 from core.file_operations import MultiPathModifier, SiblingFileFinder, FileFilter, FileMover, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration, get_media_identity, find_matching_plexcached, is_directory_level_file, is_video_file, save_json_atomically
 from core.pinned_media import PinnedMediaTracker, resolve_pins_to_paths
@@ -596,27 +596,9 @@ class PlexCacheApp:
         )
 
     def _jellyfin_paths(self) -> Tuple[Dict[str, str], List[str]]:
-        """Where Jellyfin's paths go, and the Jellyfin folders of disabled libraries.
-
-        A path mapping's jellyfin_path maps to that mapping's plex_path, so a file
-        both servers report keeps one tracker entry as before, or to its real_path
-        for a library only Jellyfin has (the run passes real paths through
-        unchanged). The older jellyfin_path_mappings (Jellyfin prefix -> Plex
-        prefix) still apply; a mapping's own jellyfin_path wins for the same prefix,
-        including when its library is switched off.
-        """
-        table = {prefix.rstrip('/'): target for prefix, target in self.config_manager.jellyfin.path_mappings.items()}
-        skipped = []
-        for mapping in self.config_manager.paths.path_mappings:
-            folder = mapping.jellyfin_path.rstrip('/')
-            if not folder:
-                continue
-            if mapping.enabled and mapping.jellyfin_enabled:
-                table[folder] = mapping.plex_path or mapping.real_path
-            else:
-                table.pop(folder, None)
-                skipped.append(folder)
-        return table, skipped
+        """Where Jellyfin's paths go, and the Jellyfin folders of disabled libraries
+        (core.jellyfin_api.jellyfin_path_table, shared with the Web UI)."""
+        return jellyfin_path_table(self.config_manager.jellyfin, self.config_manager.paths.path_mappings)
 
     def _init_jellyfin_manager(self) -> None:
         """Initialize the optional Jellyfin OnDeck source."""

@@ -260,6 +260,50 @@ class TestOrphanCleanup:
         assert tracker.is_pinned("999") is False
 
 
+class TestOnlyNotFoundDeletesAPin:
+    """A pin is deleted only when Plex says the item is gone.
+
+    `fetchItem(int(rk))` used to raise ValueError for a key that isn't a
+    number, and ValueError was caught with NotFound, so the scheduled run
+    (prune=True) deleted the pin. Pins from Jellyfin will have non-numeric
+    keys, and a hand-edited tracker can too.
+    """
+
+    def test_a_key_plex_cant_read_is_kept(self, tracker, caplog):
+        tracker._data["abc"] = {"rating_key": "abc", "type": "movie", "title": "Odd key"}
+        with caplog.at_level(logging.WARNING):
+            resolved, orphaned = resolve_pins_to_paths(FakePlexServer({}), tracker, "highest", prune=True)
+        assert resolved == [] and orphaned == []
+        assert tracker.is_pinned("abc")
+        assert any("can't read" in r.message for r in caplog.records)
+
+    def test_a_pin_from_another_server_is_skipped(self, tracker):
+        calls = []
+
+        class Server:
+            def fetchItem(self, key):
+                calls.append(key)
+                raise FakeNotFound("not a Plex item")
+
+        tracker.add_pin("5f1a9c0e2b7d4e8f9a0b1c2d3e4f5a6b", "movie", "Jellyfin film", source="jellyfin")
+        resolved, orphaned = resolve_pins_to_paths(Server(), tracker, "highest", prune=True)
+        assert calls == [] and resolved == [] and orphaned == []
+        assert tracker.get_pin("5f1a9c0e2b7d4e8f9a0b1c2d3e4f5a6b")["source"] == "jellyfin"
+
+    def test_a_value_error_from_plex_keeps_the_pin(self, tracker):
+        class Server:
+            def fetchItem(self, key):
+                raise ValueError("unexpected response")
+
+        tracker.add_pin("100", "movie", "Kept")
+        resolved, orphaned = resolve_pins_to_paths(Server(), tracker, "highest", prune=True)
+        assert orphaned == [] and tracker.is_pinned("100")
+
+    def test_plex_pins_keep_their_stored_shape(self, tracker):
+        tracker.add_pin("100", "movie", "Matrix")
+        assert "source" not in tracker.get_pin("100")
+
+
 class TestPruneIsOptIn:
     """Read-only callers must never delete a pin.
 

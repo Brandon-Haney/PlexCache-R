@@ -200,13 +200,12 @@ Still to check on a real server (Brandon can run one on Unraid): the whole flow 
 - [x] Setup wizard: "Use Jellyfin" on step 2, Jellyfin's libraries and users on steps 3 and 4, password login without Plex, and `/setup/complete` no longer saves the wizard's `_` keys (`4d64522`). Settings: the Media Servers tab (`8fa030c`), Libraries (`c821f8f`) and Users (`f659b4c`) grouped by server, with search entries.
 - [x] "Needs Plex" states: the duplicate scan, and the upgrade check skipped with Plex off (`6df19d9`). Recently Added and pins support Jellyfin instead (phase 2).
 - [x] Settings rewrite: every run rewrote `path_mappings` without the Jellyfin fields and turned an empty `plex_path` into `"/"`, which matches every path. Fixed with round-trip tests through `load_config()` (`2b85b9c`).
-- [ ] Tests:
+- [x] Tests:
   - [x] the wizard's Jellyfin-only settings load and validate (`tests/test_setup_jellyfin.py`)
   - [x] a run applies Jellyfin pins without Plex, and both servers' pins together (`tests/test_jellyfin_pins.py`)
   - [x] Plex-only rewrites of the settings file unchanged (`tests/test_jellyfin_path_mappings.py`)
-  - [ ] a whole Jellyfin-only run against a fake Jellyfin as a checked-in test (done so far with the scratch differential harness)
-  - [ ] one server down
-  - [ ] every migration on real settings files
+  - [x] whole runs against a fake Jellyfin: Jellyfin only, both servers, and one server down either way round (the other's items are cached, move-back is held) (`tests/test_media_server_runs.py`)
+  - [x] the migrations on settings shaped like v3.3.0 installs (Plex only, and with #234's Jellyfin keys) and on a wizard-made Jellyfin-only file; moving `jellyfin_path_mappings` changes where no Jellyfin file goes (`tests/test_media_server_migrations.py`)
 
 ### Phase 2: Jellyfin in the web features
 

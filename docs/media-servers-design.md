@@ -155,7 +155,16 @@ How the done ones behave:
 - **Recently Added:** each server in use is asked, Plex first. A file both report is one row (Jellyfin paths are translated to the same form), Jellyfin's libraries are marked "(Jellyfin)" when both are in use, and a server that fails is named while the other's items still show. One version per item, by `pinned_preferred_resolution`: Jellyfin's `MediaSources` are adapted to `select_media_version`.
 - **Pins:** a pin on a Jellyfin item is keyed by its Jellyfin id with `source: "jellyfin"`, and resolved by Jellyfin (movie or episode to its chosen version, show or season to its episodes). It is **never pruned**: Jellyfin derives a movie's or episode's id from its file path, so a file replaced by one with a new name gets a new id, and the old pin is logged as missing until the user unpins it. Show and season ids follow their folders and survive upgrades. A server the run doesn't use leaves its pins in place, unapplied; a server in use that can't be reached reads as unknown, never as "not pinned".
 
-Jellyfin endpoints and fields are checked against a fake Jellyfin in the tests, and still need a check against a real Jellyfin 10.9+ server, the minimum version since #234. In particular `/Items` without `userId` (Recently Added, pin search) relies on the admin API key.
+Checked against Jellyfin's source at the v10.9.0 and v10.10.0 tags (and `master`), Nov 16, 2026:
+
+- **API key, no user:** `ItemsController.GetItems` accepts an API key without `userId` and then reads every library ("api keys can always access all folders"). Recently Added, pin search and pin resolution rely on this.
+- **Item ids:** `LibraryManager.GetNewItemId` is the MD5 of the item's type name and path (lowercased unless case-sensitive ids are on). A movie's or episode's path is its file, so a replacement with a new name gets a new id; series and seasons are folders and keep theirs.
+- **Seasons without a user:** `Season.GetItemsInternal` falls back to a folder query, so `/Items?parentId=<season>` misses episodes that sit directly in the series folder (a virtual season). `/Shows/{series}/Episodes?seasonId=` goes through `Series.GetSeasonEpisodes` and finds both, so pins use the TV endpoints (`099a25d`).
+- **Fields:** `ItemFields` has `Path`, `MediaSources`, `DateCreated`, `ChildCount`, `ProviderIds`; `ProductionYear` is not one (always in the reply; unknown values are skipped by `CommaDelimitedCollectionModelBinder`). Each `MediaSources` entry carries its own `MediaStreams`, `Size` and `Bitrate`, which the version choice reads.
+- **Versions:** an item has several `MediaSources` only for local alternate versions (files named for it, like "Movie - 1080p.mkv") or versions grouped by hand. Other copies of the same film are separate items.
+- **No provider-id lookup:** `/Items` filters on whether an item has a TMDb/IMDb/TVDb id (`hasTmdbId`), not on its value.
+
+Still to check on a real server (Brandon can run one on Unraid): the whole flow end to end, `/Sessions` paths, and path substitution, which can rewrite `MediaSources` paths (`BaseItem.GetVersionInfo`).
 
 ### 8. Sign-in
 
@@ -229,8 +238,8 @@ Phase 1 is too big for one review. Proposed split, each PR passing alone and lea
 2. **One server down.** Cache from the other and skip move-back (proposed), or stop the run as today?
 3. **Jellyfin library filter.** By mapping (proposed), or by library ID on each item (`ParentId` / ancestors)?
 4. **Emby.** It shares Jellyfin's API ancestry. Out of scope unless someone asks.
-5. **Jellyfin upgrade check.** Plex keeps an item's rating key when Sonarr or Radarr swaps its file; Jellyfin gives a movie or episode a new id. Proposed: record what survives a swap on Jellyfin's tracker entries (the series id with season and episode numbers for an episode, the folder for a movie) and look the new file up by that. Needs checking against a real Jellyfin first.
-6. **Jellyfin duplicate scan.** Jellyfin groups versions only when the files follow its naming ("Movie - 1080p.mkv"); other copies show up as separate items. Scan `MediaSources` for grouped versions only, or also match separate items by provider id? The scan offers to delete files, so it should not guess.
+5. **Jellyfin upgrade check.** Plex keeps an item's rating key when Sonarr or Radarr swaps its file; Jellyfin gives a movie or episode a new id, and `/Items` can't look items up by TMDb id. What survives a swap: for an episode, its series id with the season and episode numbers (`/Shows/{series}/Episodes?season=`); for a movie, its folder (the parent id, also path-derived). Proposed: record those on Jellyfin's OnDeck entries and look the new file up by them.
+6. **Jellyfin duplicate scan.** Plex merges copies of the same film into one item; Jellyfin does so only for files named as versions, and otherwise lists separate items. Proposed: one `/Items` request per library with `fields=ProviderIds,Path,MediaSources`, then group locally by TMDb/IMDb/TVDb id plus versions within an item, so both kinds count as duplicates. The Sonarr/Radarr orphan check and the delete step stay as they are.
 
 ## Reference
 

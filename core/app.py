@@ -602,17 +602,20 @@ class PlexCacheApp:
         both servers report keeps one tracker entry as before, or to its real_path
         for a library only Jellyfin has (the run passes real paths through
         unchanged). The older jellyfin_path_mappings (Jellyfin prefix -> Plex
-        prefix) still apply; a mapping's own jellyfin_path wins for the same prefix.
+        prefix) still apply; a mapping's own jellyfin_path wins for the same prefix,
+        including when its library is switched off.
         """
-        table = dict(self.config_manager.jellyfin.path_mappings)
+        table = {prefix.rstrip('/'): target for prefix, target in self.config_manager.jellyfin.path_mappings.items()}
         skipped = []
         for mapping in self.config_manager.paths.path_mappings:
-            if not mapping.jellyfin_path:
+            folder = mapping.jellyfin_path.rstrip('/')
+            if not folder:
                 continue
             if mapping.enabled and mapping.jellyfin_enabled:
-                table[mapping.jellyfin_path] = mapping.plex_path or mapping.real_path
+                table[folder] = mapping.plex_path or mapping.real_path
             else:
-                skipped.append(mapping.jellyfin_path)
+                table.pop(folder, None)
+                skipped.append(folder)
         return table, skipped
 
     def _init_jellyfin_manager(self) -> None:

@@ -73,7 +73,7 @@ class TestActivityEndpoint:
         fake_runner = MagicMock()
         fake_runner.recent_activity = []
         fake_settings = MagicMock()
-        fake_settings.check_plex_connection.return_value = True
+        fake_settings.media_server_status.return_value = [{"key": "jellyfin", "label": "Jellyfin", "connected": True}]
         fake_settings.get_last_run_time.return_value = None
         fake_cache = MagicMock()
         fake_cache.get_user_types.return_value = {}
@@ -85,7 +85,8 @@ class TestActivityEndpoint:
 
         assert r.status_code == 200
         # Empty state renders one of the three contextual messages
-        assert any(msg in r.text for msg in ["No recent activity", "Ready to go", "Set up your Plex"])
+        assert any(msg in r.text for msg in ["No recent activity", "Ready to go"])
+        assert "Connect Plex or Jellyfin" not in r.text  # Jellyfin answers, so a server is set up
 
     def test_grouped_run_renders_header_and_members(self, client):
         now = datetime.now()

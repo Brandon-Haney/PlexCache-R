@@ -19,14 +19,16 @@
         {% else %}
         <div class="checkbox-group">
             {% for user in jellyfin_users %}
-            <label class="checkbox-item">
-                <input type="checkbox" name="cached_user" value="{{ user.name }}"
-                       {% if user.cached %}checked{% endif %} {% if user.is_disabled %}disabled{% endif %}>
-                <div class="checkbox-label">
-                    <strong>{{ user.name }}</strong>
-                    <span>{% if user.is_disabled %}Disabled in Jellyfin{% elif user.is_admin %}Administrator{% else %}User{% endif %}</span>
-                </div>
-            </label>
+            <div class="checkbox-item" style="flex-direction: column; align-items: stretch;">
+                <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+                    <input type="checkbox" name="cached_user" value="{{ user.name }}"
+                           {% if user.cached %}checked{% endif %} {% if user.is_disabled %}disabled{% endif %}>
+                    <div class="checkbox-label">
+                        <strong>{{ user.name }}</strong>
+                        <span>{% if user.is_disabled %}Disabled in Jellyfin{% elif user.is_admin %}Administrator{% else %}User{% endif %}</span>
+                    </div>
+                </label>
+            </div>
             {% endfor %}
         </div>
         {% endif %}

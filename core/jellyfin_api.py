@@ -8,11 +8,13 @@ the regular path_mappings handle them like any Plex item.
 import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from core.media_server import ActiveSessions, OnDeckItem, WatchlistItem, next_episodes_after  # noqa: F401 (re-exported)
+from core.media_server import (  # noqa: F401 (re-exported)
+    ActiveSessions, OnDeckItem, RecentlyAddedItem, RecentlyAddedResult, WatchlistItem, next_episodes_after,
+)
 
 REQUEST_TIMEOUT = 30
 ITEM_FIELDS = "Path,MediaSources"
@@ -47,6 +49,81 @@ def _parse_jellyfin_date(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value[:19]).replace(tzinfo=timezone.utc)
     except ValueError:
         return None
+
+
+def jellyfin_path_table(jellyfin_config: Any, path_mappings: List[Any]) -> Tuple[Dict[str, str], List[str]]:
+    """Where Jellyfin's paths go, and the Jellyfin folders of disabled libraries.
+
+    A path mapping's jellyfin_path maps to that mapping's plex_path, so a file
+    both servers report keeps one tracker entry, or to its real_path for a
+    library only Jellyfin has (the run passes real paths through unchanged).
+    The older jellyfin_path_mappings (Jellyfin prefix -> Plex prefix) still
+    apply; a mapping's own jellyfin_path wins for the same prefix, including
+    when its library is switched off.
+
+    jellyfin_config is a core.config.JellyfinConfig, path_mappings a list of
+    core.config.PathMapping. Used by the run and by the Web UI, so both read
+    Jellyfin's paths the same way.
+    """
+    table = {prefix.rstrip('/'): target for prefix, target in (jellyfin_config.path_mappings or {}).items()}
+    skipped = []
+    for mapping in path_mappings:
+        folder = (mapping.jellyfin_path or '').rstrip('/')
+        if not folder:
+            continue
+        if mapping.enabled and mapping.jellyfin_enabled:
+            table[folder] = mapping.plex_path or mapping.real_path
+        else:
+            table.pop(folder, None)
+            skipped.append(folder)
+    return table, skipped
+
+
+def jellyfin_manager_from_config(config_manager: Any, **kwargs) -> "JellyfinManager":
+    """A JellyfinManager with the URL, key, users and path table from a loaded ConfigManager."""
+    jellyfin = config_manager.jellyfin
+    table, skipped = jellyfin_path_table(jellyfin, config_manager.paths.path_mappings)
+    return JellyfinManager(url=jellyfin.url, api_key=jellyfin.api_key, path_mappings=table,
+                           skip_users=jellyfin.skip_users, skip_prefixes=skipped, **kwargs)
+
+
+def _source_resolution(source: Dict[str, Any]) -> str:
+    """Resolution of a Jellyfin MediaSource's video, in the keys Plex uses ("4k", "1080", "720", "480", "sd")."""
+    width = height = 0
+    for stream in source.get('MediaStreams') or []:
+        if stream.get('Type') == 'Video':
+            width, height = max(width, stream.get('Width') or 0), max(height, stream.get('Height') or 0)
+    # Width first: a 2.39:1 film in 4K is 3840x1608, in 1080p 1920x800
+    if width >= 3200 or height >= 1600:
+        return "4k"
+    if width >= 1700 or height >= 900:
+        return "1080"
+    if width >= 1100 or height >= 650:
+        return "720"
+    if width >= 640 or height >= 400:
+        return "480"
+    return "sd"
+
+
+def _source_as_media(source: Dict[str, Any]) -> SimpleNamespace:
+    """A MediaSource shaped like a plexapi Media, so core.pinned_media.select_media_version can choose."""
+    return SimpleNamespace(
+        videoResolution=_source_resolution(source),
+        # Plex reports kbps, Jellyfin bps; only the order matters
+        bitrate=(source.get('Bitrate') or 0) // 1000,
+        parts=[SimpleNamespace(file=source.get('Path'), size=int(source.get('Size') or 0))],
+    )
+
+
+def _version_label(media: SimpleNamespace) -> str:
+    """Short label like Plex's version labels: "4k", "1080p", "SD"."""
+    resolution = media.videoResolution
+    return "SD" if resolution == "sd" else (resolution if resolution.endswith('k') else f"{resolution}p")
+
+
+def _local_naive(value: Optional[datetime]) -> Optional[datetime]:
+    """A UTC datetime as naive local time, the form Plex's addedAt has, so the two sort together."""
+    return value.astimezone().replace(tzinfo=None) if value else None
 
 
 class JellyfinManager:
@@ -107,6 +184,13 @@ class JellyfinManager:
             else:
                 self._report_unmapped(path)
         return result
+
+    def _library_is_mapped(self, locations: List[str]) -> bool:
+        """Whether any of a library's folders, or a folder inside one, has a path mapping."""
+        for folder in (_normalize_prefix(location) for location in locations):
+            if self.to_plex_path(folder) or any(prefix.startswith(folder + '/') for prefix, _ in self.path_mappings):
+                return True
+        return False
 
     def _in_skipped_library(self, path: str) -> bool:
         return any(path == prefix or path.startswith(prefix + '/') for prefix in self.skip_prefixes)
@@ -178,6 +262,91 @@ class JellyfinManager:
             "is_admin": bool((user.get('Policy') or {}).get('IsAdministrator')),
             "is_disabled": bool((user.get('Policy') or {}).get('IsDisabled')),
         } for user in self._get('/Users') or []]
+
+    def get_recently_added_media(self, days_to_monitor: int, max_items: int,
+                                 version_preference: str = "highest") -> RecentlyAddedResult:
+        """Movies and episodes added in the last N days, newest first, like PlexManager's.
+
+        Asks each movie or TV library whose folders are mapped (so a switched-off
+        library is not asked) for its newest items, by DateCreated. One item per
+        Jellyfin item, describing the version chosen by the same rule pins use
+        (pinned_preferred_resolution); the others are listed in version_files.
+        A library that fails is named in unreadable_libraries; if the library
+        list itself can't be read, this raises.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_to_monitor)
+        items: List[RecentlyAddedItem] = []
+        unreadable: List[str] = []
+        for library in self.list_libraries():
+            if library['type'] not in ('movie', 'show', 'mixed'):
+                continue
+            if not self._library_is_mapped(library['locations']):
+                continue
+            try:
+                found = self._get('/Items', parentId=library['id'], recursive='true',
+                                  includeItemTypes='Movie,Episode', isMissing='false', sortBy='DateCreated',
+                                  sortOrder='Descending', fields=f"{ITEM_FIELDS},DateCreated",
+                                  limit=max_items).get('Items', [])
+            except Exception as e:
+                logging.warning(f"[JELLYFIN] Recently added: could not read library '{library['title']}': "
+                                f"{type(e).__name__}: {e}")
+                unreadable.append(library['title'])
+                continue
+            for item in found:
+                added_at = _parse_jellyfin_date(item.get('DateCreated'))
+                if added_at and added_at < cutoff:
+                    break  # newest first, so the rest are older too
+                try:
+                    entry = self._recently_added_item(item, library, added_at, version_preference)
+                except Exception as e:
+                    logging.debug(f"[JELLYFIN] Recently added: skipping '{item.get('Name')}': {type(e).__name__}: {e}")
+                    continue
+                if entry:
+                    items.append(entry)
+
+        items.sort(key=lambda i: i.added_at or datetime.min, reverse=True)
+        return RecentlyAddedResult(items=items[:max_items], unreadable_libraries=unreadable)
+
+    def _recently_added_item(self, item: Dict[str, Any], library: Dict[str, Any], added_at: Optional[datetime],
+                             version_preference: str) -> Optional[RecentlyAddedItem]:
+        from core.pinned_media import select_media_version
+        sources = [s for s in item.get('MediaSources') or [] if s.get('Path')]
+        if not sources and item.get('Path'):
+            sources = [{'Path': item['Path']}]
+        if not sources:
+            return None
+        medias = [_source_as_media(source) for source in sources]
+        preferred = select_media_version(SimpleNamespace(media=medias, title=item.get('Name', '')),
+                                         version_preference)
+        version_files = []
+        for media in medias:
+            path = self.to_plex_path(media.parts[0].file)
+            if path:
+                version_files.append({'file_path': path, 'size': media.parts[0].size,
+                                      'is_preferred': media is preferred, 'label': _version_label(media)})
+        preferred_files = [f for f in version_files if f['is_preferred']]
+        if not preferred_files:
+            return None
+
+        episode_info = None
+        media_type = 'episode' if item.get('Type') == 'Episode' else 'movie'
+        if media_type == 'episode':
+            episode_info = {'show': item.get('SeriesName'), 'season': item.get('ParentIndexNumber'),
+                            'episode': item.get('IndexNumber')}
+        return RecentlyAddedItem(
+            file_path=preferred_files[0]['file_path'],
+            rating_key=item.get('Id'),
+            title=item.get('Name', ''),
+            media_type=media_type,
+            added_at=_local_naive(added_at),
+            library_title=library['title'],
+            library_section_id=library['id'],
+            size=preferred_files[0]['size'],
+            episode_info=episode_info,
+            show_rating_key=item.get('SeriesId') or '',
+            version_files=version_files,
+            source='jellyfin',
+        )
 
     def _users_to_fetch(self, purpose: str) -> Optional[List[Dict[str, Any]]]:
         """Enabled users minus jellyfin_skip_users. None if the user list can't be read."""

@@ -1,6 +1,6 @@
 """Recently Added service (web layer).
 
-Surfaces recently-added Plex media and where each item physically lives
+Surfaces recently-added media (Plex, Jellyfin, or both) and where each item physically lives
 (cache vs array), so users can see new content and Pin items they want held
 on cache. This view does NOT cache anything itself — caching happens through
 the existing Watchlist/OnDeck pipeline or an explicit Pin. See issue #174 and
@@ -80,6 +80,7 @@ class RecentlyAddedRow:
     show_rating_key: str = ""
     is_mover_protected: bool = False  # in the Unraid mover exclude list
     is_released: bool = False
+    source: str = "plex"              # media server that reported it ("plex" | "jellyfin")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -110,6 +111,7 @@ class RecentlyAddedRow:
             "pin_holder_title": self.pin_holder_title,
             "is_mover_protected": self.is_mover_protected,
             "is_released": self.is_released,
+            "source": self.source,
         }
 
 
@@ -146,26 +148,47 @@ class RecentlyAddedService:
             logger.warning(f"RecentlyAddedService: settings not loadable: {e}")
             return self._empty_result("PlexCache is not configured yet.")
 
-        if not config.plex.plex_url or not config.plex.plex_token:
+        use_plex = getattr(config.plex, "enabled", True) and bool(config.plex.plex_url and config.plex.plex_token)
+        use_jellyfin = bool(getattr(getattr(config, "jellyfin", None), "enabled", False))
+        if not use_plex and not use_jellyfin:
             return self._empty_result("Plex server is not configured.")
 
-        plex_manager = self._connect_plex(config)
-        if plex_manager is None:
-            return self._empty_result("Could not connect to the Plex server.")
-
-        valid_sections = config.plex.valid_sections or []
         # Same version preference the pin and caching paths use, so the row
         # describes the file PlexCache would actually manage.
         version_preference = getattr(config.plex, "pinned_preferred_resolution", "highest") or "highest"
-        try:
-            fetched = plex_manager.get_recently_added_media(
-                valid_sections, days, max_items, version_preference=version_preference
-            )
-        except Exception as e:
-            logger.warning(f"RecentlyAddedService: fetch failed: {e}")
-            return self._empty_result(f"Could not fetch recently added media: {e}")
+        # Each server's result, Plex first; a server that fails is named on
+        # its own so the other's items still show.
+        fetches = []
+        failures: List[str] = []
+        plex_manager = None
+        if use_plex:
+            plex_manager = self._connect_plex(config)
+            if plex_manager is None:
+                failures.append("Could not connect to the Plex server.")
+            else:
+                try:
+                    fetches.append(("Plex", plex_manager.get_recently_added_media(
+                        config.plex.valid_sections or [], days, max_items,
+                        version_preference=version_preference)))
+                except Exception as e:
+                    logger.warning(f"RecentlyAddedService: fetch failed: {e}")
+                    failures.append(f"Could not fetch recently added media: {e}")
+        if use_jellyfin:
+            try:
+                fetches.append(("Jellyfin", self._jellyfin_recently_added(
+                    config, days, max_items, version_preference)))
+            except Exception as e:
+                logger.warning(f"RecentlyAddedService: Jellyfin fetch failed: {e}")
+                failures.append(f"Could not fetch recently added media from Jellyfin: {e}")
+        if not fetches:
+            return self._empty_result(" ".join(failures))
 
+        fetched = self._merge_fetches(fetches, max_items, both=use_plex and use_jellyfin)
         unreadable = list(fetched.unreadable_libraries)
+        if failures:
+            # One server answered and the other didn't: name the silent one
+            unreadable.append("Plex" if use_plex and not any(label == "Plex" for label, _ in fetches)
+                              else "Jellyfin")
         # Every attempted library failed and nothing came back: that is a
         # failure, not an empty result. Saying so beats three zeroed stat cards
         # under a warning, which would assert counts the app cannot know.
@@ -373,6 +396,7 @@ class RecentlyAddedService:
                 is_mover_protected=is_mover_protected,
                 is_released=is_released,
                 show_rating_key=getattr(item, "show_rating_key", "") or "",
+                source=getattr(item, "source", "plex") or "plex",
             ))
         return rows
 
@@ -604,6 +628,37 @@ class RecentlyAddedService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _jellyfin_recently_added(config, days: int, max_items: int, version_preference: str):
+        """Jellyfin's recently added items, with paths in the form the run uses (raises on failure)."""
+        from core.jellyfin_api import jellyfin_manager_from_config
+        return jellyfin_manager_from_config(config).get_recently_added_media(
+            days, max_items, version_preference=version_preference)
+
+    @staticmethod
+    def _merge_fetches(fetches, max_items: int, both: bool):
+        """One newest-first list from each server's result (Plex first).
+
+        A file both servers report keeps the first server's row: Jellyfin paths
+        are translated into the same form as Plex's, so the paths match. With
+        both servers in use, Jellyfin's library names say so, since both often
+        have a "Movies".
+        """
+        from core.media_server import RecentlyAddedResult
+        items, unreadable, seen = [], [], set()
+        for label, fetched in fetches:
+            suffix = f" ({label})" if both and label != "Plex" else ""
+            unreadable.extend(f"{title}{suffix}" for title in fetched.unreadable_libraries)
+            for item in fetched.items:
+                if item.file_path in seen:
+                    continue
+                seen.add(item.file_path)
+                if suffix:
+                    item.library_title = f"{item.library_title}{suffix}"
+                items.append(item)
+        items.sort(key=lambda i: i.added_at or datetime.min, reverse=True)
+        return RecentlyAddedResult(items=items[:max_items], unreadable_libraries=unreadable)
 
     def _connect_plex(self, config):
         """Build + connect a PlexManager from loaded config. None on failure."""

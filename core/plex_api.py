@@ -109,67 +109,10 @@ def ensure_plex_client_identity(settings_file: str) -> Optional[str]:
     return client_id
 
 
-# OnDeckItem lives in core.media_server (shared with Jellyfin); kept importable from here
-from core.media_server import OnDeckItem, next_episodes_after  # noqa: E402,F401
-
-
-@dataclass
-class RecentlyAddedItem:
-    """Represents a recently-added library item with metadata.
-
-    Unlike OnDeck/Watchlist items, recently-added media is server-wide
-    (library-level), so there is no per-user ``username`` field. One item is
-    emitted per media file (part).
-
-    Attributes:
-        file_path: Plex path to the media file.
-        rating_key: Plex rating key (for pin lookups and version grouping).
-        title: The item's own title — episode title for episodes, movie title
-            for movies. Use ``episode_info`` for show/season context.
-        media_type: "movie" or "episode".
-        added_at: When the item was added to the library (None if unavailable).
-        library_title: Display name of the source library section.
-        library_section_id: The library section id (matches ``valid_sections``).
-        size: File size in bytes for this part (0 if unavailable).
-        episode_info: For episodes, dict with 'show', 'season', 'episode' keys.
-    """
-    file_path: str
-    rating_key: Optional[str] = None
-    title: str = ""
-    media_type: str = "movie"
-    added_at: Optional[datetime] = None
-    library_title: str = ""
-    library_section_id: Optional[int] = None
-    size: int = 0
-    episode_info: Optional[Dict[str, any]] = None
-    # For episodes, the *show's* rating key. Stable identity for grouping —
-    # two distinct shows can share a title ("The Office" US and UK), and
-    # grouping on the display title merges them into one nonsense group.
-    show_rating_key: str = ""
-    # Every file behind this item, across all versions:
-    # [{file_path, size, is_preferred, label}]. ``file_path``/``size`` above
-    # describe the PREFERRED version only — the one PlexCache caches and pins.
-    version_files: List[Dict[str, any]] = field(default_factory=list)
-
-
-@dataclass
-class RecentlyAddedResult:
-    """What a recently-added sweep found, and what it could not read.
-
-    A per-library fetch can fail on its own — a section that times out or 5xxes
-    while its neighbours answer. Returning only the items would make that
-    library indistinguishable from one that genuinely had nothing new, so the
-    page would state "Nothing added" about media it never managed to look at.
-
-    Attributes:
-        items: Recently-added items, newest first, one entry per Plex item.
-        unreadable_libraries: Titles of sections that were attempted and
-            failed. Empty on a clean sweep. A total failure — no section
-            readable at all — raises instead, since there is no partial
-            result to report.
-    """
-    items: List[RecentlyAddedItem] = field(default_factory=list)
-    unreadable_libraries: List[str] = field(default_factory=list)
+# These live in core.media_server (shared with Jellyfin); kept importable from here
+from core.media_server import (  # noqa: E402,F401
+    OnDeckItem, RecentlyAddedItem, RecentlyAddedResult, next_episodes_after,
+)
 
 
 def _partial_attr(obj: Any, name: str, default: Any = None) -> Any:

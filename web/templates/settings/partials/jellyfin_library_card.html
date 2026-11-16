@@ -1,0 +1,121 @@
+<!-- One Jellyfin library on Settings > Libraries. Switching it on links each of its
+     folders to a path mapping (one Plex already uses for the same files, or a new one). -->
+<div class="library-card {% if card.enabled %}library-card-enabled{% else %}library-card-disabled{% endif %}"
+     id="jellyfin-library-card-{{ card.library.id }}">
+    <div class="card mb-2">
+        <div class="card-body">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <label class="switch" style="margin: 0;">
+                        <input type="checkbox"
+                               {% if card.enabled %}checked{% endif %}
+                               hx-post="/settings/libraries/jellyfin/{{ card.library.id }}/toggle"
+                               hx-target="#jellyfin-library-card-{{ card.library.id }}"
+                               hx-swap="outerHTML"
+                               hx-trigger="change">
+                        <span></span>
+                    </label>
+                    <strong style="font-size: 1.05rem;">{{ card.library.title }}</strong>
+                </div>
+                <span class="text-muted" style="font-size: 0.8rem;">{{ card.library.type_label }} &middot; Jellyfin</span>
+            </div>
+
+            {% if card.enabled %}
+                {% for mapping in card.mappings %}
+                {% set unrecognized = mapping.auto_fill_recognized is defined and not mapping.auto_fill_recognized %}
+                {% set share_warn = share_warning(mapping) %}
+                <div class="library-mapping-view jellyfin-mapping-view{% if unrecognized or share_warn or mapping._held_by_plex %} needs-attention{% endif %}">
+                    {% if mapping._held_by_plex %}
+                    <div class="jellyfin-mapping-note">
+                        <i data-lucide="alert-triangle"></i>
+                        This folder is shared with a Plex library that is switched off, so it isn't cached.
+                        Switch that Plex library on to cache it for both.
+                    </div>
+                    {% elif unrecognized %}
+                    <div class="jellyfin-mapping-note">
+                        <i data-lucide="alert-triangle"></i>
+                        <code>{{ mapping.jellyfin_path }}</code> isn't a folder layout PlexCache-D recognises, so the
+                        Real Path and Cache Path below are a guess. Check them under Edit Paths.
+                    </div>
+                    {% endif %}
+                    {% if share_warn %}
+                    <div class="share-mismatch-warning">
+                        <i data-lucide="alert-triangle" class="share-mismatch-warning__icon"></i>
+                        <div>
+                            <strong>{% if share_warn.kind == 'share_mismatch' %}Cache path is in a different share{% else %}Cache path is not on an Unraid share{% endif %}</strong>
+                            <div class="share-mismatch-warning__body">
+                                {% if share_warn.kind == 'share_mismatch' %}
+                                Media lives in <code>{{ share_warn.real_share }}</code> but the cache path points into <code>{{ share_warn.cache_share }}</code>,
+                                so cached files would land where the media server isn't looking.
+                                {% else %}
+                                <code>{{ share_warn.real_share }}</code> is an Unraid share, but the cache path isn't under <code>/mnt/</code>.
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    <div class="jellyfin-mapping-paths">
+                        <span class="text-muted">Jellyfin Path</span><code>{{ mapping.jellyfin_path }}</code>
+                        <span class="text-muted">Real Path</span><code>{{ mapping.real_path }}</code>
+                        <span class="text-muted">Cache Path</span>
+                        {% if mapping.cacheable and mapping.cache_path %}<code>{{ mapping.cache_path }}</code>{% else %}<span class="text-muted">Not cached</span>{% endif %}
+                        {% if mapping.plex_path %}
+                        <span class="text-muted">Plex Path</span><span><code>{{ mapping.plex_path }}</code> <span class="text-muted">(shared with Plex)</span></span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+
+                {% if card.mappings %}
+                <details class="jellyfin-edit-paths">
+                    <summary class="btn btn-sm btn-secondary"><i data-lucide="pencil"></i> Edit Paths</summary>
+                    <form hx-put="/settings/libraries/jellyfin/{{ card.library.id }}/paths"
+                          hx-target="#jellyfin-library-card-{{ card.library.id }}"
+                          hx-swap="outerHTML">
+                        {% for mapping in card.mappings %}
+                        <div class="jellyfin-edit-mapping">
+                            {% if card.mappings|length > 1 %}<div class="jellyfin-edit-mapping__name">{{ mapping.name }}</div>{% endif %}
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Jellyfin Path</label>
+                                    <input type="text" name="jellyfin_path_{{ loop.index0 }}" value="{{ mapping.jellyfin_path }}" required>
+                                    <div class="form-hint">The folder as Jellyfin sees it.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Real Path</label>
+                                    <input type="text" name="real_path_{{ loop.index0 }}" value="{{ mapping.real_path }}"
+                                           class="path-browse-input" required>
+                                    <div class="form-hint">{% if is_docker %}The same folder as seen <strong>inside</strong> this container.{% else %}The same folder on this machine.{% endif %}</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Cache Path</label>
+                                    <input type="text" name="cache_path_{{ loop.index0 }}" value="{{ mapping.cache_path or '' }}"
+                                           class="path-browse-input">
+                                    <div class="form-hint">Where cached copies are stored.</div>
+                                </div>
+                                {% if is_docker %}
+                                <div class="form-group">
+                                    <label>Host Cache Path (Docker)</label>
+                                    <input type="text" name="host_cache_path_{{ loop.index0 }}" value="{{ mapping.host_cache_path or '' }}">
+                                    <div class="form-hint">Only if the host path differs, for the Unraid mover exclude file.</div>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" name="cacheable_{{ loop.index0 }}" {% if mapping.cacheable %}checked{% endif %}>
+                                <span>Cache files from this folder</span>
+                            </label>
+                        </div>
+                        {% endfor %}
+                        <button type="submit" class="btn btn-primary btn-sm"><i data-lucide="save"></i> Save Paths</button>
+                    </form>
+                </details>
+                {% endif %}
+            {% else %}
+                <p class="text-muted mb-0" style="font-size: 0.85rem;">Switched off: files Jellyfin users watch from this library aren't cached.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>

@@ -609,7 +609,7 @@ class PlexCacheApp:
         for mapping in self.config_manager.paths.path_mappings:
             if not mapping.jellyfin_path:
                 continue
-            if mapping.enabled:
+            if mapping.enabled and mapping.jellyfin_enabled:
                 table[mapping.jellyfin_path] = mapping.plex_path or mapping.real_path
             else:
                 skipped.append(mapping.jellyfin_path)

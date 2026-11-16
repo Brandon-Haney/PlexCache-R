@@ -288,6 +288,21 @@ def resolve_pins_to_paths(
         pin_type = pin["type"]
         title = pin.get("title", rk)
 
+        # A pin from another media server is resolved by that server, and is
+        # never orphaned or pruned here (pins without a source are Plex pins).
+        source = pin.get("source", "plex")
+        if source != "plex":
+            logging.debug(f"Pinned {pin_type} '{title}' belongs to {source}; not resolved through Plex")
+            continue
+        # Plex rating keys are numbers. A key Plex can't read says nothing
+        # about whether the item still exists, so the pin is left in place.
+        if not str(rk).isdigit():
+            logging.warning(
+                f"Pinned {pin_type} '{title}' has a key Plex can't read "
+                f"(rating_key={rk!r}); leaving the pin in place"
+            )
+            continue
+
         item = None
         last_transient_err: Optional[Exception] = None
         for attempt in range(_PIN_FETCH_MAX_ATTEMPTS):
@@ -307,7 +322,10 @@ def resolve_pins_to_paths(
                         f"Retrying in {_PIN_FETCH_RETRY_WAIT}s..."
                     )
                     time.sleep(_PIN_FETCH_RETRY_WAIT)
-            except (NotFound, ValueError) as e:
+            except NotFound as e:
+                # Only Plex saying the item is gone counts as an orphan. Any
+                # other error (including ValueError) falls through to the
+                # non-retriable branch below and leaves the pin in place.
                 if prune:
                     logging.warning(
                         f"Pinned item no longer in Plex: '{title}' "
@@ -392,6 +410,7 @@ class PinnedMediaTracker(JSONTracker):
           "title": "The Office",
           "added_at": "2026-04-11T...",
           "added_by": "web",      # web | cli
+          "source": "jellyfin",   # only for pins from a server other than Plex
         }
     """
 
@@ -408,6 +427,7 @@ class PinnedMediaTracker(JSONTracker):
         pin_type: str,
         title: str,
         added_by: str = "web",
+        source: str = "plex",
     ) -> bool:
         """Add a pin. Idempotent: returns False if the key was already pinned.
 
@@ -417,6 +437,8 @@ class PinnedMediaTracker(JSONTracker):
             title: Human-readable title for display (can include scope suffix
                 like "The Office — S3" for season pins).
             added_by: ``web`` or ``cli``.
+            source: The media server the item belongs to. Stored only when it
+                is not Plex, so Plex pins keep their existing shape.
 
         Returns:
             True if the pin was newly added, False if it already existed.
@@ -436,6 +458,8 @@ class PinnedMediaTracker(JSONTracker):
                 "added_at": datetime.now().isoformat(),
                 "added_by": added_by,
             }
+            if source != "plex":
+                self._data[key]["source"] = source
             self._save()
             logging.info(f"Pinned {pin_type}: {title} (rating_key={key})")
             return True

@@ -434,7 +434,7 @@ _INDEX: List[Dict[str, Any]] = [
     # --- Cache: Advanced ---------------------------------------------------
     {
         "tab": "cache", "setting_id": "exit_if_active_session",
-        "label": "Skip Run if Plex Has Active Playback",
+        "label": "Skip Run if a Media Server Has Active Playback",
         "hint": "Exit without processing if someone is currently watching.",
         "section": "Cache", "subsection": "Advanced",
         "icon": "pause", "tone": "tone-info",

@@ -325,10 +325,10 @@ _INDEX: List[Dict[str, Any]] = [
     {
         "tab": "cache", "setting_id": "auto_transfer_upgrades",
         "label": "Auto-Transfer Tracking on Media Upgrades",
-        "hint": "When Sonarr/Radarr upgrades a cached file, transfer exclude list + tracker entries to the new file using Plex rating keys.",
+        "hint": "When Sonarr/Radarr upgrades a cached file, transfer exclude list + tracker entries to the new file (Plex or Jellyfin).",
         "section": "Cache", "subsection": "File Handling",
         "icon": "trending-up", "tone": "tone-info",
-        "keywords": ["upgrade", "sonarr", "radarr", "transfer", "tracking", "rating key", "quality"],
+        "keywords": ["upgrade", "sonarr", "radarr", "transfer", "tracking", "rating key", "quality", "jellyfin"],
     },
     {
         "tab": "cache", "setting_id": "backup_upgraded_files",

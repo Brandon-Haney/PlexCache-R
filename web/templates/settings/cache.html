@@ -208,7 +208,7 @@
                            {% if settings.auto_transfer_upgrades | default(true) %}checked{% endif %}>
                     <span>Auto-Transfer Tracking on Media Upgrades</span>
                 </label>
-                <div class="form-hint">When Sonarr/Radarr upgrades a cached file, automatically transfer exclude list and tracker entries to the new file using Plex rating keys. Plex libraries only: Jellyfin gives a replaced file a new id.</div>
+                <div class="form-hint">When Sonarr/Radarr upgrades a cached file, automatically transfer exclude list and tracker entries to the new file. Plex keeps the item's rating key; Jellyfin is matched by the movie's TMDb/IMDb id or the episode's series, season and episode.</div>
             </div>
 
             <div class="form-group" data-setting-id="backup_upgraded_files">

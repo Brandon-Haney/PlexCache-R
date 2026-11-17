@@ -1511,7 +1511,13 @@ class OnDeckTracker(JSONTracker):
                    the actual OnDeck episode vs a prefetched next episode
     - ondeck_users: Users for whom this is the CURRENT OnDeck episode (not prefetched)
     - sources: Media servers that reported it this run ("plex", "jellyfin")
+    - rating_key: Plex's rating key, kept across a Sonarr/Radarr file swap
+    - jellyfin_key: Jellyfin's equivalent (core.jellyfin_api.upgrade_key), kept
+                    apart so a file both servers report has both
     """
+
+    # Entry fields holding a key that survives a file swap; the index covers both
+    UPGRADE_KEY_FIELDS = ('rating_key', 'jellyfin_key')
 
     def __init__(self, tracker_file: str):
         """Initialize the tracker with the path to the tracker file.
@@ -1526,12 +1532,27 @@ class OnDeckTracker(JSONTracker):
 
         Maps rating_key → set of file paths to support multi-version items
         (e.g., 4K + 1080p versions of the same movie share a rating_key).
+        Jellyfin keys ("jellyfin:...") share the index; they never look like
+        Plex's numeric keys.
         """
         self._rating_key_index = {}
         for file_path, entry in self._data.items():
-            rk = entry.get('rating_key')
-            if rk:
-                self._rating_key_index.setdefault(rk, set()).add(file_path)
+            for field_name in self.UPGRADE_KEY_FIELDS:
+                rk = entry.get(field_name)
+                if rk:
+                    self._rating_key_index.setdefault(rk, set()).add(file_path)
+
+    def _unindex(self, file_path: str, entry: Dict) -> None:
+        """Drop a path from the rating_key index under each of its keys."""
+        if not hasattr(self, '_rating_key_index'):
+            return
+        for field_name in self.UPGRADE_KEY_FIELDS:
+            rk = entry.get(field_name)
+            paths = self._rating_key_index.get(rk) if rk else None
+            if paths:
+                paths.discard(file_path)
+                if not paths:
+                    del self._rating_key_index[rk]
 
     def find_by_rating_key(self, rating_key: str) -> Optional[set]:
         """Find file paths by their Plex rating key.
@@ -1551,7 +1572,8 @@ class OnDeckTracker(JSONTracker):
                      episode_info: Optional[Dict[str, any]] = None,
                      is_current_ondeck: bool = False,
                      rating_key: Optional[str] = None,
-                     source: str = "plex") -> None:
+                     source: str = "plex",
+                     jellyfin_key: Optional[str] = None) -> None:
         """Update or create an entry for an OnDeck item.
 
         Args:
@@ -1561,6 +1583,7 @@ class OnDeckTracker(JSONTracker):
             is_current_ondeck: True if this is the actual OnDeck episode (not prefetched next).
             rating_key: Plex rating key for upgrade tracking (None to leave unchanged).
             source: Media server that reported it ("plex" or "jellyfin").
+            jellyfin_key: Jellyfin's key for upgrade tracking (None to leave unchanged).
         """
         with self._lock:
             now_iso = datetime.now().isoformat()
@@ -1599,6 +1622,9 @@ class OnDeckTracker(JSONTracker):
                 if rating_key is not None:
                     entry['rating_key'] = rating_key
                     self._rating_key_index.setdefault(rating_key, set()).add(file_path)
+                if jellyfin_key is not None:
+                    entry['jellyfin_key'] = jellyfin_key
+                    self._rating_key_index.setdefault(jellyfin_key, set()).add(file_path)
 
                 # Update episode_info if provided and not already set, or update is_current_ondeck
                 if episode_info:
@@ -1626,6 +1652,9 @@ class OnDeckTracker(JSONTracker):
                 if rating_key is not None:
                     new_entry['rating_key'] = rating_key
                     self._rating_key_index.setdefault(rating_key, set()).add(file_path)
+                if jellyfin_key is not None:
+                    new_entry['jellyfin_key'] = jellyfin_key
+                    self._rating_key_index.setdefault(jellyfin_key, set()).add(file_path)
                 if episode_info:
                     new_entry['episode_info'] = {
                         'show': episode_info.get('show'),
@@ -1721,15 +1750,8 @@ class OnDeckTracker(JSONTracker):
         """
         with self._lock:
             if file_path in self._data:
-                entry = self._data[file_path]
                 # Clean up rating_key index (remove this path from the set)
-                rk = entry.get('rating_key')
-                if rk and hasattr(self, '_rating_key_index'):
-                    paths = self._rating_key_index.get(rk)
-                    if paths:
-                        paths.discard(file_path)
-                        if not paths:
-                            del self._rating_key_index[rk]
+                self._unindex(file_path, self._data[file_path])
                 del self._data[file_path]
                 self._save()
                 logging.debug(f"Removed {self._tracker_name} entry for: {file_path}")
@@ -1783,13 +1805,7 @@ class OnDeckTracker(JSONTracker):
 
             for path in stale:
                 # Clean up rating_key index (remove this path from the set)
-                rk = self._data[path].get('rating_key')
-                if rk and hasattr(self, '_rating_key_index'):
-                    paths = self._rating_key_index.get(rk)
-                    if paths:
-                        paths.discard(path)
-                        if not paths:
-                            del self._rating_key_index[rk]
+                self._unindex(path, self._data[path])
                 del self._data[path]
 
             if stale:
@@ -1818,13 +1834,7 @@ class OnDeckTracker(JSONTracker):
             unseen = [path for path in self._data if path not in seen]
             for path in unseen:
                 # Clean up rating_key index (remove this path from the set)
-                rk = self._data[path].get('rating_key')
-                if rk and hasattr(self, '_rating_key_index'):
-                    paths = self._rating_key_index.get(rk)
-                    if paths:
-                        paths.discard(path)
-                        if not paths:
-                            del self._rating_key_index[rk]
+                self._unindex(path, self._data[path])
                 del self._data[path]
 
             # Trim user_first_seen on surviving entries to only include current users

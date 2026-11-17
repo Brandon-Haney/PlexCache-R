@@ -31,7 +31,10 @@ class OnDeckItem:
         username: The user who has this on their OnDeck.
         episode_info: For TV episodes, dict with 'show', 'season', 'episode' keys.
         is_current_ondeck: True if this is the actual OnDeck episode (not prefetched next).
+        rating_key: Plex's rating key, which Plex keeps when Sonarr/Radarr replace the file.
         source: Media server that reported it ("plex" or "jellyfin").
+        jellyfin_key: Jellyfin's equivalent, which Jellyfin's item id is not, since
+            the id changes with the file (core.jellyfin_api.upgrade_key).
     """
     file_path: str
     username: str
@@ -39,6 +42,12 @@ class OnDeckItem:
     is_current_ondeck: bool = False
     rating_key: Optional[str] = None
     source: str = "plex"
+    jellyfin_key: Optional[str] = None
+
+    @property
+    def upgrade_key(self) -> Optional[str]:
+        """What stays the same when the file is replaced: the key upgrade detection matches on."""
+        return self.jellyfin_key if self.source == "jellyfin" else self.rating_key
 
 
 # (file_path, username, watchlisted_at, episode_info, rating_key, media_type)

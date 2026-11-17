@@ -126,6 +126,44 @@ def _local_naive(value: Optional[datetime]) -> Optional[datetime]:
     return value.astimezone().replace(tzinfo=None) if value else None
 
 
+# --- Keys that survive a file swap -------------------------------------------------
+# Plex keeps an item's rating key when Sonarr or Radarr replace its file. Jellyfin
+# derives an item's id from its path (LibraryManager.GetNewItemId), so the new file
+# is a new item. What carries over is what Jellyfin itself keys watch progress by
+# (BaseItem.GetUserDataKeys): a movie's TMDb/IMDb id (Video), and an episode's
+# series with its season and episode numbers (Episode). The series id follows the
+# series folder, which a swap leaves alone. A movie's ParentId is no help: a movie
+# in its own folder is resolved from that folder (MovieResolver), so its parent is
+# the library folder that every movie shares.
+
+def _provider_id(item: Dict[str, Any], name: str) -> Optional[str]:
+    """A provider id by name; Jellyfin's ProviderIds keys are case-insensitive."""
+    for key, value in (item.get('ProviderIds') or {}).items():
+        if key.lower() == name and value:
+            return str(value)
+    return None
+
+
+def upgrade_key(item: Dict[str, Any]) -> Optional[str]:
+    """What stays the same when a Jellyfin movie's or episode's file is replaced.
+
+    "jellyfin:episode:<series id>:<season>:<episode>", "jellyfin:movie:tmdb:<id>"
+    (or imdb), or None when Jellyfin hasn't identified the item. Movies need
+    ProviderIds in the request's fields.
+    """
+    if item.get('Type') == 'Episode':
+        series, season, episode = item.get('SeriesId'), item.get('ParentIndexNumber'), item.get('IndexNumber')
+        if series and season is not None and episode is not None:
+            return f"jellyfin:episode:{series}:{season}:{episode}"
+        return None
+    if item.get('Type') == 'Movie':
+        for provider in ('tmdb', 'imdb'):
+            value = _provider_id(item, provider)
+            if value:
+                return f"jellyfin:movie:{provider}:{value}"
+    return None
+
+
 class JellyfinManager:
     """Fetches OnDeck-equivalent media from a Jellyfin server via an admin API key."""
 
@@ -457,6 +495,85 @@ class JellyfinManager:
             files.extend((v['file_path'], v['size']) for v in self._versions(item, preference) if v['is_preferred'])
         return files
 
+    # --- Library listings: the upgrade check and the duplicate scan ------------------
+    # No userId either. Listings ask for ProviderIds and MediaSourceCount only and
+    # leave images and user data out; files (MediaSources, with their streams) are
+    # fetched for the few items that need them.
+
+    LISTING_PAGE = 500
+    IDS_PER_REQUEST = 50
+
+    def _mapped_video_libraries(self) -> List[Dict[str, Any]]:
+        """Movie, TV and mixed libraries whose folders are mapped (a switched-off library is left out)."""
+        return [lib for lib in self.list_libraries()
+                if lib['type'] in ('movie', 'show', 'mixed') and self._library_is_mapped(lib['locations'])]
+
+    def _library_items(self, library_id: str, item_types: str, fields: str,
+                       stop_check: Optional[Any] = None) -> Any:
+        """Every item of these types in a library, a page at a time."""
+        start = 0
+        while not (stop_check and stop_check()):
+            page = self._get('/Items', parentId=library_id, recursive='true', includeItemTypes=item_types,
+                             isMissing='false', fields=fields, enableImages='false', enableUserData='false',
+                             sortBy='SortName', startIndex=start, limit=self.LISTING_PAGE)
+            items = page.get('Items', [])
+            yield from items
+            start += len(items)
+            if len(items) < self.LISTING_PAGE or start >= (page.get('TotalRecordCount') or 0):
+                return
+
+    def _items_with_files(self, ids: List[str]) -> List[Dict[str, Any]]:
+        """Jellyfin's records for these ids, with Path and MediaSources."""
+        items = []
+        for i in range(0, len(ids), self.IDS_PER_REQUEST):
+            batch = ids[i:i + self.IDS_PER_REQUEST]
+            items.extend(self._get('/Items', ids=','.join(batch), fields=ITEM_FIELDS).get('Items', []))
+        return items
+
+    def _movie_ids_by_key(self) -> Dict[str, List[str]]:
+        """upgrade_key -> ids of the movies in the mapped libraries, read once per manager."""
+        if getattr(self, '_movie_keys', None) is None:
+            index: Dict[str, List[str]] = {}
+            for library in self._mapped_video_libraries():
+                if library['type'] == 'show':
+                    continue
+                for item in self._library_items(library['id'], 'Movie', 'ProviderIds'):
+                    for provider in ('tmdb', 'imdb'):
+                        value = _provider_id(item, provider)
+                        if value and item.get('Id'):
+                            index.setdefault(f"jellyfin:movie:{provider}:{value}", []).append(item['Id'])
+            self._movie_keys = index
+        return self._movie_keys
+
+    def files_for_upgrade_key(self, key: str) -> List[str]:
+        """Files of the items that answer to an upgrade_key now, in the form the run uses.
+
+        An episode key asks its series for that season (/Shows/{id}/Episodes
+        with season=, which needs no user); a movie key looks its TMDb or IMDb
+        id up in the mapped movie libraries, since /Items can't filter by
+        provider id. [] when nothing answers, including a series that is gone
+        (404). Raises if Jellyfin can't be asked.
+        """
+        parts = key.split(':')
+        if len(parts) == 5 and parts[:2] == ['jellyfin', 'episode']:
+            series_id, season, episode = parts[2:]
+            try:
+                found = self._get(f'/Shows/{series_id}/Episodes', season=season, isMissing='false',
+                                  fields=ITEM_FIELDS).get('Items', [])
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 404:
+                    return []
+                raise
+            items = [e for e in found if str(e.get('IndexNumber')) == episode]
+        elif len(parts) == 4 and parts[:2] == ['jellyfin', 'movie']:
+            items = self._items_with_files(self._movie_ids_by_key().get(key, []))
+        else:
+            return []
+        paths: List[str] = []
+        for item in items:
+            paths.extend(self._item_paths(item))
+        return list(dict.fromkeys(paths))
+
     def _users_to_fetch(self, purpose: str) -> Optional[List[Dict[str, Any]]]:
         """Enabled users minus jellyfin_skip_users. None if the user list can't be read."""
         try:
@@ -475,8 +592,9 @@ class JellyfinManager:
     def _fetch_user_on_deck_media(self, user_id: str, username: str, days_to_monitor: int,
                                   number_episodes: int, prefetch_minimum_minutes: int) -> List[OnDeckItem]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_to_monitor)
+        # ProviderIds give movies the key that survives a file swap (upgrade_key)
         resume = self._get_user_items(username, 'Continue Watching', '/UserItems/Resume', userId=user_id,
-                                      fields=ITEM_FIELDS, mediaTypes='Video')
+                                      fields=f"{ITEM_FIELDS},ProviderIds", mediaTypes='Video')
         # Next Up filters by the series' last played date server-side
         next_up = self._get_user_items(username, 'Next Up', '/Shows/NextUp', userId=user_id, fields=ITEM_FIELDS,
                                        nextUpDateCutoff=cutoff.strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -501,7 +619,8 @@ class JellyfinManager:
                 elif item.get('Type') == 'Movie':
                     for path in self._item_paths(item):
                         on_deck_files.append(OnDeckItem(file_path=path, username=username,
-                                                        is_current_ondeck=True, source='jellyfin'))
+                                                        is_current_ondeck=True, source='jellyfin',
+                                                        jellyfin_key=upgrade_key(item)))
                 else:
                     logging.debug(f"[JELLYFIN] Skipping OnDeck item '{item.get('Name')}' — type {item.get('Type')}")
             except Exception as e:
@@ -596,7 +715,7 @@ class JellyfinManager:
         for path in self._item_paths(item):
             on_deck_files.append(OnDeckItem(file_path=path, username=username,
                                             episode_info=episode_info, is_current_ondeck=True,
-                                            source='jellyfin'))
+                                            source='jellyfin', jellyfin_key=upgrade_key(item)))
 
         if episode_info is None or not item.get('SeriesId'):
             logging.warning(f"[JELLYFIN] Skipping next episode fetch for '{show}' - missing index data")
@@ -625,7 +744,7 @@ class JellyfinManager:
             for path in self._item_paths(next_episode.item):
                 on_deck_files.append(OnDeckItem(file_path=path, username=username,
                                                 episode_info=next_info, is_current_ondeck=False,
-                                                source='jellyfin'))
+                                                source='jellyfin', jellyfin_key=upgrade_key(next_episode.item)))
 
     def get_active_sessions(self) -> ActiveSessions:
         """Everything currently playing on Jellyfin, with Plex-space paths where a mapping exists."""

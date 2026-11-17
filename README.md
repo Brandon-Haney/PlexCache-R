@@ -339,7 +339,7 @@ PlexCache-D works with Plex, **Jellyfin 10.9 or newer**, or both. Pick the serve
 
 **Users.** Settings → Users lists Jellyfin's users; switch off anyone whose items shouldn't be cached (`jellyfin_skip_users`). All other enabled users are fetched, regardless of `users_toggle` (that setting only applies to Plex).
 
-**Pins, Recently Added and the dashboard** cover both servers. A pin on a Jellyfin movie or episode follows its Jellyfin id, and Jellyfin gives a file a new id when it is replaced by one with a new name (a Sonarr or Radarr upgrade), so pin the new file then; the old pin is logged as missing and stays until you remove it. Show and season pins survive upgrades. The duplicate scan and the upgrade check in Maintenance still read Plex only.
+**Pins, Recently Added and the dashboard** cover both servers. A pin on a Jellyfin movie or episode follows its Jellyfin id, and Jellyfin gives a file a new id when it is replaced by one with a new name (a Sonarr or Radarr upgrade), so pin the new file then; the old pin is logged as missing and stays until you remove it. Show and season pins survive upgrades. Cached files follow an upgrade on either server: Jellyfin is matched by the movie's TMDb or IMDb id, or the episode's series, season and episode. The duplicate scan in Maintenance reads Jellyfin too, counting both versions of one item and copies Jellyfin lists as separate items.
 
 **Login.** With Require Login on, administrators of the Jellyfin server sign in with their Jellyfin account. The password login stays an optional fallback.
 

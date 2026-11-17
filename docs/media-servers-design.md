@@ -145,8 +145,8 @@ Today a `PathMapping` (`core/config.py:44-72`) has one `plex_path`. Jellyfin pat
 |---|---|---|
 | Recently Added | `get_recently_added_media` (`core/plex_api.py`) | Done: `JellyfinManager.get_recently_added_media`, `/Items` per mapped movie or TV library sorted by `DateCreated` |
 | Pins | `plex.search`, `fetchItem` (`web/services/pinned_service.py`) | Done: `/Items?searchTerm=`, `/Items?parentId=`, `/Items?ids=` with `MediaSources` for the version choice |
-| Upgrade check | `fetchItem(rating_key)`, compare the file (`web/services/cache_service.py`) | Open (question 5). Skipped when Plex is off |
-| Duplicate scan | `library.sections()` (`web/services/duplicate_service.py`) | Open (question 6). The card says it needs Plex |
+| Upgrade check | `fetchItem(rating_key)`, compare the file (`web/services/cache_service.py`) | Done: matched on a key Jellyfin keeps across a swap (`jellyfin_key`) |
+| Duplicate scan | `library.sections()` (`web/services/duplicate_service.py`) | Done: library listings grouped by that key, plus versions within an item |
 | Dashboard status | "Plex Connected" | Done: a badge per server in use |
 | Source badges | done in #234 | done in #234 |
 
@@ -154,6 +154,8 @@ How the done ones behave:
 
 - **Recently Added:** each server in use is asked, Plex first. A file both report is one row (Jellyfin paths are translated to the same form), Jellyfin's libraries are marked "(Jellyfin)" when both are in use, and a server that fails is named while the other's items still show. One version per item, by `pinned_preferred_resolution`: Jellyfin's `MediaSources` are adapted to `select_media_version`.
 - **Pins:** a pin on a Jellyfin item is keyed by its Jellyfin id with `source: "jellyfin"`, and resolved by Jellyfin (movie or episode to its chosen version, show or season to its episodes). It is **never pruned**: Jellyfin derives a movie's or episode's id from its file path, so a file replaced by one with a new name gets a new id, and the old pin is logged as missing until the user unpins it. Show and season ids follow their folders and survive upgrades. A server the run doesn't use leaves its pins in place, unapplied; a server in use that can't be reached reads as unknown, never as "not pinned".
+- **Upgrade check (question 5):** Jellyfin's item id changes with the file, so Jellyfin OnDeck entries record a `jellyfin_key` beside Plex's `rating_key`: what Jellyfin itself keys watch progress by, `jellyfin:movie:tmdb:<id>` (else IMDb) or `jellyfin:episode:<series id>:<season>:<episode>` (`core/jellyfin_api.upgrade_key`). The OnDeck tracker indexes both fields, so the run's swap detection works unchanged: the next run sees the new file under the same key (Jellyfin carries the progress over, so a swapped movie stays in Continue Watching). A file both servers follow is found under both keys and transferred once. The Maintenance audit asks Jellyfin which file answers to the key now (`files_for_upgrade_key`: an episode's series by season number; a movie's TMDb/IMDb id in a listing of the mapped movie libraries, read once per audit). If the old file still answers, it's not an upgrade; if several new files answer (a film kept in two copies), the ones already tracked are left out and only a single remaining file counts. For a file both servers report, Plex's answer stands. The folder idea in the original proposal didn't hold: a movie in its own folder is resolved from that folder (`MovieResolver`), so its `ParentId` is the library folder every movie shares.
+- **Duplicate scan (question 6):** each server in use is scanned. Jellyfin's mapped movie and TV libraries are listed a page at a time (500) with `fields=ProviderIds,MediaSourceCount` and no images or user data; items are grouped by the same key within a library, and an item with `MediaSourceCount` > 1 (versions) counts on its own. Files (`MediaSources`, with their streams) are fetched only for those groups, 50 ids a request. The results use the Plex scan's multi-version check, Sonarr/Radarr orphan check, ignore list (keyed by the group key, which survives a re-scan) and delete step. A group with a file no mapping covers is left out, since it couldn't be deleted by a known path. With both servers, a Jellyfin group whose files Plex already listed is left out and Jellyfin's libraries are marked "(Jellyfin)". The card's "needs" state shows only when neither server is in use.
 
 Checked against Jellyfin's source at the v10.9.0 and v10.10.0 tags (and `master`), Nov 16, 2026:
 
@@ -163,6 +165,8 @@ Checked against Jellyfin's source at the v10.9.0 and v10.10.0 tags (and `master`
 - **Fields:** `ItemFields` has `Path`, `MediaSources`, `DateCreated`, `ChildCount`, `ProviderIds`; `ProductionYear` is not one (always in the reply; unknown values are skipped by `CommaDelimitedCollectionModelBinder`). Each `MediaSources` entry carries its own `MediaStreams`, `Size` and `Bitrate`, which the version choice reads.
 - **Versions:** an item has several `MediaSources` only for local alternate versions (files named for it, like "Movie - 1080p.mkv") or versions grouped by hand. Other copies of the same film are separate items.
 - **No provider-id lookup:** `/Items` filters on whether an item has a TMDb/IMDb/TVDb id (`hasTmdbId`), not on its value.
+- **What survives a swap:** watch progress is keyed by `BaseItem.GetUserDataKeys()`: a movie's IMDb and TMDb ids (`Video`), an episode's series keys with its season and episode numbers (`Episode`). `master` reads progress rows by those keys too (`UserDataManager.ResolveUserDataRow`). A movie's `Path` is its file and its `Name` starts as its folder name (`MovieResolver`), its parent being the library folder.
+- **Listings:** `/Items` takes `startIndex`, `limit`, `enableImages`, `enableUserData`, and `fields=MediaSourceCount` (set only when an item has more than one source). `/Shows/{series}/Episodes?season=<number>` finds the season by number through `Series.GetSeasons`, without a user.
 
 Still to check on a real server (Brandon can run one on Unraid): the whole flow end to end, `/Sessions` paths, and path substitution, which can rewrite `MediaSources` paths (`BaseItem.GetVersionInfo`).
 
@@ -212,8 +216,8 @@ Still to check on a real server (Brandon can run one on Unraid): the whole flow 
 - [x] Dashboard status per server, kept current after a server change (`dc0c553`, `8b32fd9`).
 - [x] Recently Added (`ad97012`).
 - [x] Pins: search, expand, versions, budget, the run, Recently Added and Cached Files (`f41362e`).
-- [ ] The upgrade check (open question 5).
-- [ ] The duplicate scan (open question 6).
+- [x] The upgrade check: the run and the Maintenance audit follow a Jellyfin file swap by `jellyfin_key` (`tests/test_jellyfin_upgrade_check.py`, and a two-run test in `tests/test_media_server_runs.py`).
+- [x] The duplicate scan: Jellyfin-only and both servers (`tests/test_jellyfin_duplicate_scan.py`).
 
 ### Phase 3: Sign-in and wording
 
@@ -238,8 +242,8 @@ Phase 1 is too big for one review. Proposed split, each PR passing alone and lea
 2. **One server down.** Cache from the other and skip move-back (proposed), or stop the run as today?
 3. **Jellyfin library filter.** By mapping (proposed), or by library ID on each item (`ParentId` / ancestors)?
 4. **Emby.** It shares Jellyfin's API ancestry. Out of scope unless someone asks.
-5. **Jellyfin upgrade check.** Plex keeps an item's rating key when Sonarr or Radarr swaps its file; Jellyfin gives a movie or episode a new id, and `/Items` can't look items up by TMDb id. What survives a swap: for an episode, its series id with the season and episode numbers (`/Shows/{series}/Episodes?season=`); for a movie, its folder (the parent id, also path-derived). Proposed: record those on Jellyfin's OnDeck entries and look the new file up by them.
-6. **Jellyfin duplicate scan.** Plex merges copies of the same film into one item; Jellyfin does so only for files named as versions, and otherwise lists separate items. Proposed: one `/Items` request per library with `fields=ProviderIds,Path,MediaSources`, then group locally by TMDb/IMDb/TVDb id plus versions within an item, so both kinds count as duplicates. The Sonarr/Radarr orphan check and the delete step stay as they are.
+5. **Jellyfin upgrade check.** Settled and built (section 7): matched on what Jellyfin keys watch progress by.
+6. **Jellyfin duplicate scan.** Settled and built (section 7): library listings grouped by the same key.
 
 ## Reference
 

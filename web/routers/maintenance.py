@@ -927,11 +927,11 @@ def start_next_now():
 
 @router.post("/scan-duplicates", response_class=HTMLResponse)
 def scan_duplicates(request: Request):
-    """Trigger a background Plex duplicate scan"""
+    """Trigger a background duplicate scan of the media servers' libraries"""
     service = get_duplicate_service()
     response = _start_async_action(
         "scan-duplicates",
-        service.scan_plex_libraries,
+        service.scan_libraries,
         file_count=0,
         max_workers=1,
     )
@@ -963,12 +963,13 @@ def get_duplicates(request: Request, show_ignored: bool = Query(default=False)):
         for i in arr_instances
     )
 
-    from core.config import plex_enabled
+    from core.config import jellyfin_configured, plex_enabled
+    settings = get_settings_service().get_all()
     return templates.TemplateResponse(
         request,
         "maintenance/partials/duplicate_card.html",
         {
-            "plex_in_use": plex_enabled(get_settings_service().get_all()),
+            "media_server_in_use": plex_enabled(settings) or jellyfin_configured(settings),
             "scan_results": results,
             "arr_configured": arr_configured,
             "ignored_count": len(ignores),

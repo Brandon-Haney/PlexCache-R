@@ -1,13 +1,12 @@
-<!-- Plex Duplicate Files - HTMX partial loaded inside audit_results.html -->
+<!-- Duplicate Files - HTMX partial loaded inside audit_results.html -->
 
-{% if plex_in_use is defined and not plex_in_use %}
-<!-- State 0: Plex isn't in use. The scan reads Plex's libraries; Jellyfin isn't scanned yet. -->
+{% if media_server_in_use is defined and not media_server_in_use %}
+<!-- State 0: neither Plex nor Jellyfin is in use, so there are no libraries to scan. -->
 <div style="text-align: center; padding: 2rem 1rem;">
     <i data-lucide="scan-search" style="width: 40px; height: 40px; color: var(--plex-text-muted); margin-bottom: 0.75rem;"></i>
-    <p style="margin: 0 0 0.5rem 0; font-weight: 500;">Needs Plex</p>
+    <p style="margin: 0 0 0.5rem 0; font-weight: 500;">Needs a Media Server</p>
     <p class="text-muted" style="margin: 0; font-size: 0.9rem;">
-        The duplicate scan reads Plex's libraries, and Plex isn't in use here.
-        Jellyfin libraries aren't scanned for duplicates yet.
+        The duplicate scan reads the libraries of Plex or Jellyfin, and neither is in use here.
     </p>
 </div>
 
@@ -17,7 +16,7 @@
     <i data-lucide="scan-search" style="width: 40px; height: 40px; color: var(--plex-text-muted); margin-bottom: 0.75rem;"></i>
     <p style="margin: 0 0 0.5rem 0; font-weight: 500;">No Scan Data</p>
     <p class="text-muted" style="margin: 0 0 1rem 0; font-size: 0.9rem;">
-        Scan your Plex libraries to find items with duplicate media files.
+        Scan your libraries to find movies and episodes with duplicate media files.
     </p>
     {% if arr_configured %}
     <p style="margin: 0 0 1rem 0; font-size: 0.85rem;">

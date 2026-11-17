@@ -45,7 +45,7 @@ ACTION_DISPLAY = {
     "restore-plexcached": "Restoring {count} backup(s)...",
     "delete-plexcached": "Deleting {count} backup(s)...",
     "repair-plexcached": "Repairing {count} backup(s)...",
-    "scan-duplicates": "Scanning Plex libraries...",
+    "scan-duplicates": "Scanning libraries...",
     "delete-duplicates": "Deleting {count} duplicate(s)...",
     "delete-extensionless": "Deleting {count} extensionless file(s)...",
     "evict-files": "Evicting {count} file(s) from cache...",

@@ -1,7 +1,10 @@
-"""Duplicate file scanner service — finds Plex items with multiple media files.
+"""Duplicate file scanner service — finds movies and episodes with multiple media files.
 
-Scans all Plex library sections for items that have more than one media file,
-which typically means duplicate downloads or failed Sonarr/Radarr upgrades.
+Scans the libraries of each media server in use (Plex, Jellyfin) for items that
+have more than one media file, which typically means duplicate downloads or
+failed Sonarr/Radarr upgrades. Plex merges copies into one item; Jellyfin lists
+copies not named as versions as separate items, so its items are grouped by the
+key a file swap keeps (core.jellyfin_api.JellyfinManager.duplicate_groups).
 
 If Sonarr/Radarr credentials are configured, automatically classifies files as
 keeper (tracked by arr) or orphan (safe to delete).
@@ -193,7 +196,7 @@ IGNORE_FILE = os.path.join("data", "duplicate_ignores.json")
 
 
 class DuplicateService:
-    """Scans Plex libraries for duplicate files and manages cleanup."""
+    """Scans media server libraries for duplicate files and manages cleanup."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -202,7 +205,7 @@ class DuplicateService:
     # Public: scan
     # ------------------------------------------------------------------
 
-    def scan_plex_libraries(
+    def scan_libraries(
         self,
         paths: Optional[List[str]] = None,
         dry_run: bool = False,
@@ -212,10 +215,12 @@ class DuplicateService:
         max_workers: int = 1,
         active_callback: Optional[Callable] = None,
     ) -> ActionResult:
-        """Scan all Plex libraries for items with multiple media files.
+        """Scan the libraries of every media server in use for items with multiple media files.
 
         Signature matches MaintenanceRunner's expected service method interface.
         ``paths`` and ``dry_run`` are accepted for signature compatibility but unused.
+        With both servers in use, a Jellyfin item whose files Plex already
+        listed is left out, and Jellyfin's library names say "(Jellyfin)".
         """
         start_time = time.time()
 
@@ -228,56 +233,30 @@ class DuplicateService:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
 
-            from core.config import plex_enabled
-            if not plex_enabled(settings):
+            from core.config import jellyfin_configured, plex_enabled
+            use_plex, use_jellyfin = plex_enabled(settings), jellyfin_configured(settings)
+            if not use_plex and not use_jellyfin:
                 return ActionResult(success=False,
-                                    message="The duplicate scan reads Plex libraries, and Plex isn't in use")
+                                    message="The duplicate scan reads Plex or Jellyfin libraries, "
+                                            "and neither is in use")
 
-            plex_url = settings.get("PLEX_URL", "").strip()
-            plex_token = settings.get("PLEX_TOKEN", "").strip()
-            if not plex_url or not plex_token:
-                return ActionResult(success=False, message="Plex URL or token not configured")
-
-            path_mappings = settings.get("path_mappings", [])
-
-            # Phase 1: Connect to Plex
-            if progress_callback:
-                progress_callback(0, 0, "Connecting to Plex...")
-
-            from plexapi.server import PlexServer
-            plex = PlexServer(plex_url, plex_token, timeout=30)
-            logger.info(f"Connected to Plex: {plex.friendlyName}")
-
-            # Get library sections
-            sections = [s for s in plex.library.sections() if s.type in ('movie', 'show')]
-            if not sections:
-                return ActionResult(success=False, message="No movie or TV show libraries found")
-
-            # Phase 2: Scan libraries
             duplicates: List[PlexDuplicateItem] = []
             total_items_scanned = 0
-            libraries_scanned = []
+            libraries_scanned: List[str] = []
 
-            for section in sections:
-                if stop_check and stop_check():
-                    return ActionResult(success=False, message="Scan cancelled")
+            if use_plex:
+                scanned = self._scan_plex(settings, duplicates, stop_check, progress_callback)
+                if isinstance(scanned, ActionResult):
+                    return scanned
+                total_items_scanned += scanned[0]
+                libraries_scanned.extend(scanned[1])
 
-                if progress_callback:
-                    progress_callback(0, 0, f"Scanning: {section.title}...")
-
-                libraries_scanned.append(section.title)
-
-                if section.type == 'movie':
-                    items_scanned = self._scan_movie_section(
-                        section, duplicates, path_mappings,
-                        stop_check, progress_callback
-                    )
-                else:
-                    items_scanned = self._scan_show_section(
-                        section, duplicates, path_mappings,
-                        stop_check, progress_callback
-                    )
-                total_items_scanned += items_scanned
+            if use_jellyfin and not (stop_check and stop_check()):
+                scanned = self._scan_jellyfin(SETTINGS_FILE, duplicates, use_plex, stop_check, progress_callback)
+                if isinstance(scanned, ActionResult):
+                    return scanned
+                total_items_scanned += scanned[0]
+                libraries_scanned.extend(scanned[1])
 
             if stop_check and stop_check():
                 return ActionResult(success=False, message="Scan cancelled")
@@ -362,6 +341,120 @@ class DuplicateService:
         except Exception as e:
             logger.error(f"Duplicate scan failed: {e}", exc_info=True)
             return ActionResult(success=False, message=f"Scan failed: {str(e)[:200]}")
+
+    def _scan_plex(self, settings: dict, duplicates: List[PlexDuplicateItem],
+                   stop_check: Optional[Callable], progress_callback: Optional[Callable]):
+        """Plex's movie and TV sections: (items scanned, section titles), or an ActionResult on failure."""
+        plex_url = settings.get("PLEX_URL", "").strip()
+        plex_token = settings.get("PLEX_TOKEN", "").strip()
+        if not plex_url or not plex_token:
+            return ActionResult(success=False, message="Plex URL or token not configured")
+
+        path_mappings = settings.get("path_mappings", [])
+
+        # Phase 1: Connect to Plex
+        if progress_callback:
+            progress_callback(0, 0, "Connecting to Plex...")
+
+        from plexapi.server import PlexServer
+        plex = PlexServer(plex_url, plex_token, timeout=30)
+        logger.info(f"Connected to Plex: {plex.friendlyName}")
+
+        # Get library sections
+        sections = [s for s in plex.library.sections() if s.type in ('movie', 'show')]
+        if not sections:
+            return ActionResult(success=False, message="No movie or TV show libraries found")
+
+        # Phase 2: Scan libraries
+        total_items_scanned = 0
+        libraries_scanned = []
+
+        for section in sections:
+            if stop_check and stop_check():
+                return ActionResult(success=False, message="Scan cancelled")
+
+            if progress_callback:
+                progress_callback(0, 0, f"Scanning: {section.title}...")
+
+            libraries_scanned.append(section.title)
+
+            if section.type == 'movie':
+                items_scanned = self._scan_movie_section(
+                    section, duplicates, path_mappings,
+                    stop_check, progress_callback
+                )
+            else:
+                items_scanned = self._scan_show_section(
+                    section, duplicates, path_mappings,
+                    stop_check, progress_callback
+                )
+            total_items_scanned += items_scanned
+
+        return total_items_scanned, libraries_scanned
+
+    def _scan_jellyfin(self, settings_file, duplicates: List[PlexDuplicateItem], both: bool,
+                       stop_check: Optional[Callable], progress_callback: Optional[Callable]):
+        """Jellyfin's mapped movie and TV libraries: (items scanned, library titles), or an ActionResult.
+
+        A file whose path no mapping covers can't be offered for deletion, so
+        an item with one is left out of the results.
+        """
+        from core.config import ConfigManager
+        from core.file_operations import MultiPathModifier
+        from core.jellyfin_api import duplicate_file, jellyfin_manager_from_config
+
+        if progress_callback:
+            progress_callback(0, 0, "Connecting to Jellyfin...")
+        config = ConfigManager(str(settings_file))
+        config.load_config(persist_updates=False)
+        if not config.jellyfin.enabled:
+            return ActionResult(success=False, message="Jellyfin URL or API key not configured")
+        jellyfin = jellyfin_manager_from_config(config)
+        modifier = MultiPathModifier(config.paths.path_mappings)
+
+        def progress(message: str) -> None:
+            if progress_callback:
+                progress_callback(0, 0, message)
+
+        groups, titles, scanned = jellyfin.duplicate_groups(stop_check, progress)
+        suffix = " (Jellyfin)" if both else ""
+        listed = {f.fs_path for item in duplicates for f in item.files}
+        for group in groups:
+            files: List[DuplicateFileEntry] = []
+            unmapped = False
+            for item in group['items']:
+                for source in item.get('MediaSources') or []:
+                    found = duplicate_file(source)
+                    if not found['path'] or any(f.file_path == found['path'] for f in files):
+                        continue
+                    run_path = jellyfin.to_plex_path(found['path'])
+                    fs_path, mapping = modifier.convert_plex_to_real(run_path) if run_path else (None, None)
+                    if mapping is None:
+                        unmapped = True
+                        continue
+                    files.append(DuplicateFileEntry(
+                        file_path=found['path'],
+                        fs_path=fs_path,
+                        size=found['size'],
+                        size_display=format_bytes(found['size']),
+                        resolution=found['resolution'],
+                        container=found['container'],
+                        video_codec=found['video_codec'],
+                        bitrate=found['bitrate'],
+                    ))
+            if unmapped:
+                logger.debug(f"Duplicate scan: skipping {group['title']}, a file has no path mapping")
+                continue
+            if len(files) < 2 or all(f.fs_path in listed for f in files):
+                continue
+            duplicates.append(PlexDuplicateItem(
+                rating_key=group['key'],
+                title=group['title'],
+                item_type=group['item_type'],
+                library=group['library'] + suffix,
+                files=files,
+            ))
+        return scanned, [title + suffix for title in titles]
 
     # ------------------------------------------------------------------
     # Public: delete

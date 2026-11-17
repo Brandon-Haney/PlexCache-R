@@ -164,6 +164,30 @@ def upgrade_key(item: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _duplicate_title(item: Dict[str, Any]) -> str:
+    """How the duplicate scan names an item, as it names Plex's: "Title (Year)", "Show - S01E02 - Title"."""
+    name = item.get('Name', '')
+    if item.get('Type') == 'Episode':
+        show = item.get('SeriesName') or ''
+        season, episode = item.get('ParentIndexNumber'), item.get('IndexNumber')
+        if season is not None and episode is not None:
+            return f"{show} - S{season:02d}E{episode:02d} - {name}"
+        return f"{show} - {name}"
+    year = item.get('ProductionYear')
+    return f"{name} ({year})" if year else name
+
+
+def duplicate_file(source: Dict[str, Any]) -> Dict[str, Any]:
+    """A MediaSource as the duplicate scan lists a file: path, size, resolution
+    (Plex's keys: "4k", "1080", ...), container, video codec, bitrate in kbps as Plex has it."""
+    codec = next((stream.get('Codec') for stream in source.get('MediaStreams') or []
+                  if stream.get('Type') == 'Video'), None)
+    bitrate = source.get('Bitrate')
+    return {'path': source.get('Path'), 'size': int(source.get('Size') or 0),
+            'resolution': _source_resolution(source), 'container': source.get('Container') or '?',
+            'video_codec': codec or '?', 'bitrate': bitrate // 1000 if bitrate else None}
+
+
 class JellyfinManager:
     """Fetches OnDeck-equivalent media from a Jellyfin server via an admin API key."""
 
@@ -573,6 +597,59 @@ class JellyfinManager:
         for item in items:
             paths.extend(self._item_paths(item))
         return list(dict.fromkeys(paths))
+
+    def duplicate_groups(self, stop_check: Optional[Any] = None,
+                         progress: Optional[Any] = None) -> Tuple[List[Dict[str, Any]], List[str], int]:
+        """Movies and episodes with more than one file, library by library.
+
+        Plex merges copies of a film or episode into one item. Jellyfin does so
+        only for files named as versions (one item, MediaSourceCount > 1) and
+        otherwise lists each copy as its own item. Both count here: items are
+        grouped by upgrade_key (a movie's TMDb/IMDb id; an episode's series,
+        season and episode numbers), within one library as Plex's sections are.
+
+        Returns (groups, library titles, items scanned). A group is {key, title,
+        item_type ('movie' | 'episode'), library, items}, its items being
+        Jellyfin records with Path and MediaSources. The key is the
+        upgrade_key, or "jellyfin:item:<id>" for one item with versions.
+        """
+        groups: List[Dict[str, Any]] = []
+        titles: List[str] = []
+        scanned = 0
+        for library in self._mapped_video_libraries():
+            if stop_check and stop_check():
+                break
+            titles.append(library['title'])
+            if progress:
+                progress(f"Scanning: {library['title']}...")
+            item_types = {'movie': 'Movie', 'show': 'Episode'}.get(library['type'], 'Movie,Episode')
+            by_key: Dict[str, List[Dict[str, Any]]] = {}
+            for item in self._library_items(library['id'], item_types, 'ProviderIds,MediaSourceCount', stop_check):
+                scanned += 1
+                if not item.get('Id'):
+                    continue
+                key = upgrade_key(item)
+                if key:
+                    by_key.setdefault(key, []).append(item)
+                elif (item.get('MediaSourceCount') or 1) > 1:
+                    by_key[f"jellyfin:item:{item['Id']}"] = [item]
+            wanted = {key: found for key, found in by_key.items()
+                      if len(found) > 1 or (found[0].get('MediaSourceCount') or 1) > 1}
+            if not wanted:
+                continue
+            records = {item['Id']: item for item in self._items_with_files(
+                [item['Id'] for found in wanted.values() for item in found])}
+            for key, found in wanted.items():
+                items = [records[item['Id']] for item in found if item['Id'] in records]
+                paths = {source.get('Path') for item in items for source in item.get('MediaSources') or []
+                         if source.get('Path')}
+                if len(paths) < 2:
+                    continue
+                first = items[0]
+                is_episode = first.get('Type') == 'Episode'
+                groups.append({'key': key, 'title': _duplicate_title(first), 'library': library['title'],
+                               'item_type': 'episode' if is_episode else 'movie', 'items': items})
+        return groups, titles, scanned
 
     def _users_to_fetch(self, purpose: str) -> Optional[List[Dict[str, Any]]]:
         """Enabled users minus jellyfin_skip_users. None if the user list can't be read."""

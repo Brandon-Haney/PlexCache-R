@@ -1,9 +1,10 @@
-"""What still needs Plex when Plex isn't in use (docs/media-servers-design.md).
+"""What each server's absence switches off (docs/media-servers-design.md).
 
-The duplicate scan reads Plex's libraries, so with Plex switched off its card
-says so instead of offering a scan, and the scan itself refuses. The upgrade
-check only works for Plex (Jellyfin gives a replaced file a new id), so with
-Plex switched off it doesn't connect to the Plex it still has settings for.
+The duplicate scan reads Plex or Jellyfin: only with neither in use does its
+card say so instead of offering a scan, and the scan itself refuse. With Plex
+switched off, neither the scan nor the upgrade check connects to the Plex it
+still has settings for (tests/test_jellyfin_duplicate_scan.py and
+tests/test_jellyfin_upgrade_check.py cover Jellyfin's side).
 """
 
 import json
@@ -30,21 +31,23 @@ def _card(**context):
         scan_results=None, arr_configured=False, ignored_count=0, ignored_items=[], show_ignored=False, **context)
 
 
-def test_the_duplicate_card_says_it_needs_plex():
-    html = _card(plex_in_use=False)
-    assert "Needs Plex" in html and "startDuplicateScan()" not in html
-    assert "startDuplicateScan()" in _card(plex_in_use=True)
+def test_the_duplicate_card_needs_a_media_server():
+    html = _card(media_server_in_use=False)
+    assert "Needs a Media Server" in html and "startDuplicateScan()" not in html
+    assert "startDuplicateScan()" in _card(media_server_in_use=True)
     assert "startDuplicateScan()" in _card()  # rendered without the flag, as before
 
 
-def test_the_duplicate_scan_refuses_without_plex(tmp_path):
+def test_the_duplicate_scan_refuses_without_a_media_server(tmp_path, monkeypatch):
+    for key in ("JELLYFIN_URL", "JELLYFIN_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     settings_file = tmp_path / "plexcache_settings.json"
-    settings_file.write_text(json.dumps(PLEX_OFF), encoding="utf-8")
+    settings_file.write_text(json.dumps({**PLEX_OFF, "jellyfin_enabled": False}), encoding="utf-8")
     from web.services.duplicate_service import DuplicateService
     service = DuplicateService.__new__(DuplicateService)
     with patch("web.config.SETTINGS_FILE", settings_file), patch("plexapi.server.PlexServer") as plex:
-        result = service.scan_plex_libraries()
-    assert not result.success and "Plex isn't in use" in result.message
+        result = service.scan_libraries()
+    assert not result.success and "neither is in use" in result.message
     plex.assert_not_called()
 
 

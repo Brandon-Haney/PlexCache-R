@@ -55,8 +55,9 @@ class FakeJellyfin:
     series' episodes, favorites, sessions and item lookups. ``down`` refuses
     every request, like a stopped server."""
 
-    def __init__(self, down=False):
+    def __init__(self, down=False, resume=None):
         self.down = down
+        self.resume = resume or ARRIVAL
         self.headers = {}
 
     def get(self, url, params=None, timeout=None):
@@ -73,7 +74,8 @@ class FakeJellyfin:
         if path == "/Users":
             return USERS
         if path == "/UserItems/Resume":
-            return {"Items": [ARRIVAL] if user == "u-roger" else []}
+            assert "ProviderIds" in params["fields"]  # movies' key across a file swap
+            return {"Items": [self.resume] if user == "u-roger" else []}
         if path == "/Shows/NextUp":
             return {"Items": [EPISODES[1]] if user == "u-mia" else []}
         if path == "/Shows/s-frieren/Episodes":
@@ -232,3 +234,24 @@ def test_jellyfin_only_with_jellyfin_down_caches_nothing_and_moves_nothing_back(
         app = run(JELLYFIN_ONLY, jellyfin=FakeJellyfin(down=True))
     assert app.all_active_media == []
     assert "Skipping array restore - Jellyfin OnDeck data incomplete" in caplog.text
+
+
+def test_a_jellyfin_file_swap_is_followed_into_the_next_run(run, caplog):
+    """Radarr replaces Arrival's file. Jellyfin lists the new file as a new item (its id
+    comes from the path) with the same TMDb id, and keeps roger's progress, since it
+    keys watch progress by that id (Video.GetUserDataKeys). The next run matches the
+    two by the id and moves the tracking across, as Plex's rating key does."""
+    before = {**ARRIVAL, "ProviderIds": {"Tmdb": "329865"}}
+    after = {**before, "Id": "b" * 32,
+             "MediaSources": [{"Path": "/media/movies/Arrival (2016)/Arrival 2160p.mkv", "Size": 9000}]}
+    first = run(JELLYFIN_ONLY, jellyfin=FakeJellyfin(resume=before))
+    entry = first.ondeck_tracker._data["/mnt/user/movies/Arrival (2016)/Arrival.mkv"]
+    assert entry["jellyfin_key"] == "jellyfin:movie:tmdb:329865" and "rating_key" not in entry
+
+    with caplog.at_level(logging.INFO):
+        run(JELLYFIN_ONLY, jellyfin=FakeJellyfin(resume=after))
+    assert ("Would transfer tracking from Arrival.mkv → Arrival 2160p.mkv "
+            "(rating_key=jellyfin:movie:tmdb:329865)") in caplog.text
+    # The next episodes carry their series' key too
+    episodes = first.ondeck_tracker._data["/mnt/user/anime/Frieren/S01E03.mkv"]
+    assert episodes["jellyfin_key"] == "jellyfin:episode:s-frieren:1:3"

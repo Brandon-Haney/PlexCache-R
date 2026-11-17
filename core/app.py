@@ -1242,6 +1242,7 @@ class PlexCacheApp:
                 is_current_ondeck=item.is_current_ondeck,
                 rating_key=item.rating_key,
                 source=item.source,
+                jellyfin_key=item.jellyfin_key,
             )
             # Build media_info_map from OnDeck metadata
             ep = item.episode_info
@@ -1706,6 +1707,10 @@ class PlexCacheApp:
         Multi-version items (e.g., 4K + 1080p) share a rating_key and are NOT
         treated as upgrades — only paths that replace other paths trigger transfers.
 
+        Jellyfin items match on their jellyfin_key (OnDeckItem.upgrade_key),
+        since Jellyfin gives a replaced file a new item id. A file both servers
+        report can be found under both keys; it is transferred once.
+
         Args:
             ondeck_items_list: Current OnDeck items from Plex API.
             plex_to_real: Mapping from Plex paths to real filesystem paths.
@@ -1730,12 +1735,13 @@ class PlexCacheApp:
         # Build current rating_key → set of real paths
         current_rk_paths = {}
         for item in ondeck_items_list:
-            if not item.rating_key:
+            if not item.upgrade_key:
                 continue
             real_path = plex_to_real.get(item.file_path, item.file_path)
-            current_rk_paths.setdefault(item.rating_key, set()).add(real_path)
+            current_rk_paths.setdefault(item.upgrade_key, set()).add(real_path)
 
         upgrades_detected = 0
+        transferred = set()  # canonical old paths, so a file under two keys moves once
         for rk, old_paths in pre_run_rk_index.items():
             if self.should_stop:
                 logging.info("[UPGRADE] Stop requested — halting upgrade detection")
@@ -1768,12 +1774,15 @@ class PlexCacheApp:
                     break
                 old_path = old_by_canon[old_canon]
                 new_path = new_by_canon[new_canon]
+                if old_canon in transferred:
+                    continue
+                transferred.add(old_canon)
                 upgrades_detected += 1
                 logging.info(f"[UPGRADE] Detected file upgrade for rating_key={rk}: "
                              f"{os.path.basename(old_path)} → {os.path.basename(new_path)}")
                 # Find an OnDeckItem for the new path to pass metadata
                 item_for_transfer = next(
-                    (i for i in ondeck_items_list if i.rating_key == rk
+                    (i for i in ondeck_items_list if i.upgrade_key == rk
                      and plex_to_real.get(i.file_path, i.file_path) == new_path),
                     None
                 )
@@ -1794,12 +1803,13 @@ class PlexCacheApp:
             new_path: The new real filesystem path (after upgrade).
             item: The OnDeckItem with metadata for the new file.
         """
-        rating_key = item.rating_key
+        rating_key = item.rating_key  # stored on the new entries; None for a Jellyfin item
+        key = item.upgrade_key        # named in the log
 
         if self.dry_run:
             logging.info(f"[UPGRADE][DRY-RUN] Would transfer tracking from "
                          f"{os.path.basename(old_path)} → {os.path.basename(new_path)} "
-                         f"(rating_key={rating_key})")
+                         f"(rating_key={key})")
             return
 
         # Resolve cache paths for old and new files
@@ -1813,7 +1823,7 @@ class PlexCacheApp:
         if old_cache_path and new_cache_path:
             self.file_filter.remove_files_from_exclude_list([old_cache_path])
             self.file_filter._add_to_exclude_file(new_cache_path)
-            logging.info(f"[UPGRADE] Transferred exclude list entry (rating_key={rating_key})")
+            logging.info(f"[UPGRADE] Transferred exclude list entry (rating_key={key})")
 
         # 2. Update timestamp tracker: read old entry source, remove old, record new
         if hasattr(self, 'timestamp_tracker') and self.timestamp_tracker:
@@ -1836,7 +1846,7 @@ class PlexCacheApp:
                 new_ts_key, source=old_source, media_type=media_type,
                 episode_info=episode_info_ts, rating_key=rating_key
             )
-            logging.info(f"[UPGRADE] Transferred timestamp entry (rating_key={rating_key}, source={old_source})")
+            logging.info(f"[UPGRADE] Transferred timestamp entry (rating_key={key}, source={old_source})")
 
         # 3. Remove old OnDeck entry (new one was already created by update_entry in the loop)
         self.ondeck_tracker.remove_entry(old_path)
@@ -1864,12 +1874,12 @@ class PlexCacheApp:
                             new_path, user, watchlisted_at,
                             rating_key=rating_key, media_type=old_media_type, source=old_source,
                         )
-                logging.info(f"[UPGRADE] Transferred watchlist entry with {len(users)} user(s) (rating_key={rating_key})")
+                logging.info(f"[UPGRADE] Transferred watchlist entry with {len(users)} user(s) (rating_key={key})")
 
         # 5. Handle .plexcached backup files
-        self._handle_upgrade_plexcached(old_path, new_path, rating_key, new_cache_path)
+        self._handle_upgrade_plexcached(old_path, new_path, key, new_cache_path)
 
-        logging.info(f"[UPGRADE] Tracking transfer complete for rating_key={rating_key}")
+        logging.info(f"[UPGRADE] Tracking transfer complete for rating_key={key}")
 
     def _handle_upgrade_plexcached(self, old_path: str, new_path: str,
                                     rating_key: str,

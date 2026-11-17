@@ -2007,9 +2007,12 @@ class CacheService:
     def check_for_upgrades(self, stale_exclude_entries: List[str]) -> Dict[str, Any]:
         """Check if stale exclude entries are actually media upgrades (Sonarr/Radarr swaps).
 
-        For each stale entry that has a rating_key in the OnDeck tracker, queries Plex
-        to see if the file path has changed (indicating an upgrade). If so, transfers
-        all tracking data from the old path to the new path.
+        For each stale entry whose OnDeck tracker entry has a key that survives a
+        file swap, asks the server that recorded it for the current file. If the
+        file path has changed (an upgrade), transfers all tracking data from the
+        old path to the new path. Plex entries carry Plex's rating_key; Jellyfin
+        entries a jellyfin_key (core.jellyfin_api.upgrade_key), since Jellyfin
+        gives the new file a new item id. Each server is asked only when in use.
 
         Args:
             stale_exclude_entries: Cache paths that are in the exclude list but not on cache.
@@ -2030,9 +2033,10 @@ class CacheService:
         if not ondeck_data:
             return result
 
-        # For each stale entry, check if it maps to an ondeck entry with a rating_key
+        # For each stale entry, check if it maps to an ondeck entry with a key
         # Note: OnDeck tracker keys are REAL paths (/mnt/user/...), not Plex paths
-        candidates: List[Tuple[str, str, str]] = []  # (cache_path, rating_key, real_path)
+        plex_candidates: List[Tuple[str, str, str]] = []  # (cache_path, rating_key, real_path)
+        jellyfin_candidates: List[Tuple[str, str, str]] = []  # (cache_path, jellyfin_key, real_path)
         for cache_path in stale_exclude_entries:
             real_path = self._cache_to_real(cache_path, path_mappings)
             if not real_path:
@@ -2040,32 +2044,49 @@ class CacheService:
             # Look up by real path (OnDeck tracker key format)
             entry = ondeck_data.get(real_path)
             if entry and entry.get('rating_key'):
-                candidates.append((cache_path, entry['rating_key'], real_path))
+                plex_candidates.append((cache_path, entry['rating_key'], real_path))
+            if entry and entry.get('jellyfin_key'):
+                jellyfin_candidates.append((cache_path, entry['jellyfin_key'], real_path))
 
+        resolved = set()
+        for found in self._plex_upgrade_paths(plex_candidates, settings, path_mappings, logger):
+            if self._apply_upgrade(result, found, settings, path_mappings, logger):
+                resolved.add(found[0])
+        # A file both servers report: Plex's answer stands
+        jellyfin_candidates = [c for c in jellyfin_candidates if c[0] not in resolved]
+        for found in self._jellyfin_upgrade_paths(jellyfin_candidates, settings, path_mappings,
+                                                  ondeck_data, logger):
+            self._apply_upgrade(result, found, settings, path_mappings, logger)
+
+        if result["upgrades_resolved"] > 0:
+            logger.info(f"[UPGRADE] Resolved {result['upgrades_resolved']} media upgrade(s) via web audit")
+
+        return result
+
+    def _plex_upgrade_paths(self, candidates, settings: Dict, path_mappings: List[Dict], logger):
+        """Plex entries whose item now has another file:
+        (cache_path, rating_key, old_real_path, old_plex_path, new_plex_path, new_real_path)."""
         if not candidates:
-            return result
+            return
 
-        # Only Plex keeps an item's key across a file swap; Jellyfin gives the
-        # new file a new id, so its entries carry no rating_key and never get
-        # here. With Plex switched off there's nothing to ask.
         from core.config import plex_enabled
         if not plex_enabled(settings):
             logger.debug("Upgrade check skipped: Plex is not in use")
-            return result
+            return
 
         # Connect to Plex once for all candidates
         plex_url = settings.get('plex_url', '') or settings.get('PLEX_URL', '')
         plex_token = settings.get('plex_token', '') or settings.get('PLEX_TOKEN', '')
         if not plex_url or not plex_token:
             logger.debug("Upgrade check skipped: no Plex credentials configured")
-            return result
+            return
 
         try:
             from plexapi.server import PlexServer
             plex = PlexServer(plex_url, plex_token, timeout=10)
         except Exception as e:
             logger.warning(f"Upgrade check: could not connect to Plex: {e}")
-            return result
+            return
 
         # Check each candidate against Plex
         for cache_path, rating_key, old_real_path in candidates:
@@ -2091,49 +2112,122 @@ class CacheService:
             if new_real_path == old_real_path:
                 continue  # Same path, not an upgrade
 
-            # Upgrade detected
-            result["upgrades_found"] += 1
-
-            new_cache_path = self._real_to_cache(new_real_path, path_mappings)
-            if not new_cache_path:
-                logger.warning(f"Upgrade detected (rk={rating_key}) but cannot convert new real path: {new_real_path}")
-                continue
-
-            # Verify the new file actually exists on cache
-            if not os.path.exists(new_cache_path):
-                logger.debug(f"Upgrade detected (rk={rating_key}) but new file not yet on cache: {new_cache_path}")
-                continue
-
             # Derive plex paths for watchlist tracker (uses plex path keys)
             old_plex_path = self._real_to_plex(old_real_path, path_mappings)
+            yield cache_path, rating_key, old_real_path, old_plex_path, new_plex_path, new_real_path
 
-            logger.info(f"[UPGRADE] Detected file upgrade (rk={rating_key}): "
-                        f"{os.path.basename(cache_path)} -> {os.path.basename(new_cache_path)}")
+    def _jellyfin_upgrade_paths(self, candidates, settings: Dict, path_mappings: List[Dict],
+                                ondeck_data: Dict, logger):
+        """Jellyfin entries whose key now answers with another file, in the shape _plex_upgrade_paths yields.
 
-            success = self._transfer_upgrade_tracking(
-                old_cache_path=cache_path,
-                old_real_path=old_real_path,
-                old_plex_path=old_plex_path,
-                new_cache_path=new_cache_path,
-                new_real_path=new_real_path,
-                new_plex_path=new_plex_path,
-                rating_key=rating_key,
-                settings=settings,
-                path_mappings=path_mappings,
-            )
+        Old and new "plex" paths are in the form the run uses (a Plex path, or
+        a real path for a library only Jellyfin has), as the watchlist tracker
+        keys them. A key can answer with several files (a film kept in two
+        copies): then the ones already tracked are left out, and only a single
+        remaining file counts.
+        """
+        if not candidates:
+            return
 
-            if success:
-                result["upgrades_resolved"] += 1
-                result["details"].append({
-                    "rating_key": rating_key,
-                    "old_file": os.path.basename(cache_path),
-                    "new_file": os.path.basename(new_cache_path),
-                })
+        from core.config import jellyfin_configured
+        if not jellyfin_configured(settings):
+            logger.debug("Upgrade check skipped for Jellyfin entries: Jellyfin is not in use")
+            return
 
-        if result["upgrades_resolved"] > 0:
-            logger.info(f"[UPGRADE] Resolved {result['upgrades_resolved']} media upgrade(s) via web audit")
+        try:
+            from core.config import ConfigManager
+            from core.file_operations import MultiPathModifier
+            from core.jellyfin_api import jellyfin_manager_from_config
+            config = ConfigManager(str(self.settings_file))
+            config.load_config(persist_updates=False)
+            if not config.jellyfin.enabled:
+                return
+            jellyfin = jellyfin_manager_from_config(config)
+            modifier = MultiPathModifier(config.paths.path_mappings)
+        except Exception as e:
+            logger.warning(f"Upgrade check: could not set up Jellyfin: {e}")
+            return
 
-        return result
+        timestamps = None
+        for cache_path, key, old_real_path in candidates:
+            try:
+                run_paths = jellyfin.files_for_upgrade_key(key)
+            except Exception as e:
+                logger.warning(f"Upgrade check: could not ask Jellyfin: {type(e).__name__}: {e}")
+                return
+            found = []  # (run path, real path)
+            for run_path in run_paths:
+                real_path, mapping = modifier.convert_plex_to_real(run_path)
+                if mapping is not None:
+                    found.append((run_path, real_path))
+            if any(real == old_real_path for _, real in found):
+                continue  # The old file still answers: not an upgrade
+            if len(found) > 1:
+                if timestamps is None:
+                    timestamps = self.get_timestamps()
+                found = [(run, real) for run, real in found if real not in ondeck_data
+                         and self._real_to_cache(real, path_mappings) not in timestamps]
+            if len(found) != 1:
+                logger.debug(f"Upgrade check: {key} answers with {len(found)} untracked file(s), leaving it")
+                continue
+            new_plex_path, new_real_path = found[0]
+            old_plex_path = self._real_to_run(old_real_path, path_mappings)
+            yield cache_path, key, old_real_path, old_plex_path, new_plex_path, new_real_path
+
+    def _apply_upgrade(self, result: Dict[str, Any], found: Tuple, settings: Dict,
+                       path_mappings: List[Dict], logger) -> bool:
+        """Count an upgrade and move its tracking to the new file. True if transferred."""
+        cache_path, rating_key, old_real_path, old_plex_path, new_plex_path, new_real_path = found
+
+        # Upgrade detected
+        result["upgrades_found"] += 1
+
+        new_cache_path = self._real_to_cache(new_real_path, path_mappings)
+        if not new_cache_path:
+            logger.warning(f"Upgrade detected (rk={rating_key}) but cannot convert new real path: {new_real_path}")
+            return False
+
+        # Verify the new file actually exists on cache
+        if not os.path.exists(new_cache_path):
+            logger.debug(f"Upgrade detected (rk={rating_key}) but new file not yet on cache: {new_cache_path}")
+            return False
+
+        logger.info(f"[UPGRADE] Detected file upgrade (rk={rating_key}): "
+                    f"{os.path.basename(cache_path)} -> {os.path.basename(new_cache_path)}")
+
+        success = self._transfer_upgrade_tracking(
+            old_cache_path=cache_path,
+            old_real_path=old_real_path,
+            old_plex_path=old_plex_path,
+            new_cache_path=new_cache_path,
+            new_real_path=new_real_path,
+            new_plex_path=new_plex_path,
+            rating_key=rating_key,
+            settings=settings,
+            path_mappings=path_mappings,
+        )
+
+        if success:
+            result["upgrades_resolved"] += 1
+            result["details"].append({
+                "rating_key": rating_key,
+                "old_file": os.path.basename(cache_path),
+                "new_file": os.path.basename(new_cache_path),
+            })
+        return success
+
+    @staticmethod
+    def _real_to_run(real_path: str, path_mappings: List[Dict]) -> Optional[str]:
+        """A real path in the form the run uses: its Plex path, or itself when its
+        mapping has no Plex path (a library only Jellyfin has)."""
+        for mapping in path_mappings:
+            if not mapping.get('enabled', True):
+                continue
+            real_prefix = (mapping.get('real_path') or '').rstrip('/')
+            if real_prefix and (real_path == real_prefix or real_path.startswith(real_prefix + '/')):
+                plex_prefix = (mapping.get('plex_path') or '').rstrip('/')
+                return plex_prefix + real_path[len(real_prefix):] if plex_prefix else real_path
+        return None
 
     def _transfer_upgrade_tracking(
         self,

@@ -356,6 +356,28 @@ def setup_has_media_server(settings: Dict[str, Any]) -> bool:
     return plex_saved or jellyfin_saved
 
 
+# The path mapping fields v3.3.0 and earlier write back when they save the
+# settings file: they rebuild each mapping from this list, and their loader turns
+# an empty plex_path into "/", a prefix every Plex path starts with.
+OLDER_VERSION_MAPPING_FIELDS = frozenset({
+    'name', 'plex_path', 'real_path', 'cache_path', 'host_cache_path', 'cacheable', 'enabled', 'section_id'})
+
+
+def older_versions_mishandle(settings: Dict[str, Any]) -> bool:
+    """Whether v3.3.0 or earlier would lose or misread part of these settings when saving them.
+
+    True when a path mapping has a field they drop (the Jellyfin ones) or no
+    Plex path (a library only Jellyfin has). Going back to such a version then
+    needs the settings file as it was before.
+    """
+    for mapping in settings.get('path_mappings') or []:
+        if not isinstance(mapping, dict):
+            continue
+        if set(mapping) - OLDER_VERSION_MAPPING_FIELDS or not str(mapping.get('plex_path') or '').strip():
+            return True
+    return False
+
+
 def _derive_migrated_cache_path(real_source: str, cache_dir: str) -> str:
     """Derive a specific cache_path from legacy real_source + cache_dir.
 

@@ -119,7 +119,7 @@ Today a `PathMapping` (`core/config.py:44-72`) has one `plex_path`. Jellyfin pat
   - This replaced the earlier plan of a per-server `to_real(path, server)`. It needs no change to `MultiPathModifier` and no tracker migration.
   - `jellyfin_path_mappings` still applies; a mapping's own `jellyfin_path` wins for the same prefix. Folders of disabled mappings are skipped without the "unmapped path" notice.
   - Web UI mapping edits keep `section_id`, `jellyfin_path` and `jellyfin_library_id` (`SettingsService.KEPT_MAPPING_FIELDS`).
-- **Migration (with the Libraries screen):** each `jellyfin_path_mappings` entry (Jellyfin prefix → Plex prefix) folds into the mappings whose `plex_path` starts with that Plex prefix, as `jellyfin_path = jellyfin_prefix + rest`. Entries that line up with no mapping are kept and logged. One-time, marker in `data/migrations.json` as in #202, settings backed up first. Not needed for the run itself, since both forms work side by side; it's for showing one list in the UI.
+- **Migration (with the Libraries screen):** each `jellyfin_path_mappings` entry (Jellyfin prefix → Plex prefix) folds into the mappings whose `plex_path` starts with that Plex prefix, as `jellyfin_path = jellyfin_prefix + rest`. Entries that line up with no mapping are kept and logged. One-time; the first save of a Jellyfin path keeps the file as it was (see Compatibility rules). Not needed for the run itself, since both forms work side by side; it's for showing one list in the UI.
 - **Library toggles:** Jellyfin's library list (`/Library/VirtualFolders`: name, `ItemId`, `CollectionType`, `Locations`) feeds setup and the Libraries tab, the way Plex sections do. Jellyfin items whose path falls in a disabled mapping are skipped. That gives Jellyfin the library filter it doesn't have today.
 
 ### 5. IDs and trackers
@@ -187,6 +187,7 @@ Still to check on a real server (Brandon can run one on Unraid): the whole flow 
 - Existing settings files load unchanged. Migrations are additive, run once, back up first, and leave a marker.
 - A Plex-only install makes the same moves before and after each phase. Check this with runs on fixture settings compared before and after.
 - The env vars, the settings import/export (`KNOWN_SETTINGS_KEYS`, `REDACTED_EXPORT_KEYS`) and the API key keep working. New secret settings join the export redaction.
+- **Going back to v3.3.0.** v3.3.0 and earlier rebuild each path mapping from a fixed list of fields whenever they save the settings file (every run): they drop the Jellyfin fields, and their loader turns an empty `plex_path` into "/", which every Plex path matches. So the first Web UI save that adds either (`core.config.older_versions_mishandle`) first copies the file, byte for byte, to `data/plexcache_settings.before-media-servers.json`; put it back before going back. An install whose libraries all have Plex paths only loses Jellyfin on 3.3.0. Releases after 3.3.0 keep both (see the settings forward-compatibility PR).
 
 ## Phases
 

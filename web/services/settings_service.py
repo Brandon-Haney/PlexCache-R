@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -214,6 +215,7 @@ class SettingsService:
         that: readers always see either the old or the new complete file.
         """
         from core.file_operations import save_json_atomically
+        self._keep_rollback_copy(settings)
         try:
             if not save_json_atomically(str(self.settings_file), settings, label="settings"):
                 return False
@@ -548,7 +550,6 @@ class SettingsService:
             if not took:
                 remaining[jellyfin_prefix] = plex_prefix
         if changed:
-            self._backup_settings(raw, "before-jellyfin-paths")
             if from_env is None:
                 raw["jellyfin_path_mappings"] = remaining
             logger.info("Moved %s onto the path mappings they cover",
@@ -569,15 +570,35 @@ class SettingsService:
             return None
         return {k: v for k, v in parsed.items() if isinstance(k, str) and isinstance(v, str) and k and v}
 
-    def _backup_settings(self, raw: Dict[str, Any], label: str) -> None:
-        """Keep a copy of the settings file in the data folder before a migration rewrites it."""
+    ROLLBACK_COPY = "plexcache_settings.before-media-servers.json"
+
+    def _keep_rollback_copy(self, settings: Dict[str, Any]) -> None:
+        """Keep the settings file as it is before the first save that older versions would mishandle.
+
+        v3.3.0 and earlier rebuild each path mapping from a fixed list of fields
+        when they save the file (core.config.older_versions_mishandle), so after
+        Jellyfin paths are saved, going back to one loses them, and a library
+        only Jellyfin has gets "/" as its Plex path. This copy, in the data
+        folder, is the file to put back first. Made once; a file that already
+        has the new fields has no older form to keep.
+        """
+        from core.config import older_versions_mishandle
+        if not older_versions_mishandle(settings):
+            return
         try:
-            from core.file_operations import save_json_atomically
-            backup = DATA_DIR / f"plexcache_settings.{label}.json"
-            if not backup.exists():
-                save_json_atomically(str(backup), self._load_raw(), label="settings backup")
+            backup = DATA_DIR / self.ROLLBACK_COPY
+            if backup.exists():
+                return
+            current = self._load_raw()
+            if not current.get("path_mappings") or older_versions_mishandle(current):
+                return
+            # The file itself, byte for byte and with its permissions (it holds secrets)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.settings_file, backup)
+            logger.info(f"Kept a copy of the settings as {backup}: put it back before going back "
+                        f"to v3.3.0 or earlier")
         except Exception as e:
-            logger.warning(f"Could not back up settings before {label}: {e}")
+            logger.warning(f"Could not keep a copy of the settings before saving Jellyfin paths: {e}")
 
     def _link_jellyfin_library_ids(self, raw: Dict[str, Any], libraries: List[Dict[str, Any]]) -> bool:
         """Give mappings with a Jellyfin path but no library its Jellyfin library, by folder."""

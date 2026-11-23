@@ -130,7 +130,6 @@ def test_moving_jellyfin_path_mappings_changes_where_no_file_goes(tmp_path):
     with patch("web.services.settings_service.DATA_DIR", tmp_path):
         assert svc.fold_jellyfin_path_mappings(raw) is True
         assert svc.fold_jellyfin_path_mappings(raw) is False  # once only
-    assert (tmp_path / "plexcache_settings.before-jellyfin-paths.json").exists()
     assert raw["jellyfin_path_mappings"] == {"/media/music": "/data/music"}
     assert [m.get("jellyfin_path") for m in raw["path_mappings"]] == ["/media/movies", "/media/shows", None]
 

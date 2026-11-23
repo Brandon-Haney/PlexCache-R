@@ -208,7 +208,8 @@ def test_older_jellyfin_path_mappings_move_onto_the_mappings(make_client, tmp_pa
     assert tv["jellyfin_path"] == "/media/tv/shows"  # nested under the Plex prefix
     assert raw["jellyfin_path_mappings"] == {"/media/music": "/data/music/"}  # covered nothing: kept
     assert 'id="jellyfin-library-card-lib-movies"' in page
-    assert (tmp_path / "plexcache_settings.before-jellyfin-paths.json").exists()
+    # The file as v3.3.0 left it, kept before the first save it would mishandle
+    assert json.loads((tmp_path / "plexcache_settings.before-media-servers.json").read_text())["jellyfin_path_mappings"]
 
     client.get("/settings/libraries/jellyfin")
     assert svc._load_raw()["path_mappings"] == raw["path_mappings"]  # again: nothing changes

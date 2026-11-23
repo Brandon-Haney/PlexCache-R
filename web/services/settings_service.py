@@ -13,7 +13,7 @@ from web.config import DATA_DIR, SETTINGS_FILE, IS_DOCKER
 from web.api_access import DEFAULT_COOLDOWN_SECONDS, clamp_cooldown
 # Defaults come from core's dataclass rather than repeated literals: the engine
 # reads CacheConfig, so anything hardcoded here can disagree with what runs.
-from core.config import CacheConfig
+from core.config import CacheConfig, mapping_extra_fields
 from core.system_utils import size_setting_error
 from web.dependencies import get_system_detector
 
@@ -353,7 +353,8 @@ class SettingsService:
     def update_path_mapping(self, index: int, mapping: Dict[str, Any]) -> bool:
         """Update an existing path mapping by index (sanitizes paths to strip whitespace).
 
-        Preserves section_id from the existing mapping if not in the update dict.
+        Preserves section_id from the existing mapping if not in the update dict,
+        and the fields this version doesn't read (a newer version's).
         """
         raw = self._load_raw()
         mappings = raw.get("path_mappings", [])
@@ -362,6 +363,7 @@ class SettingsService:
             existing = mappings[index]
             if "section_id" not in mapping and "section_id" in existing:
                 mapping["section_id"] = existing["section_id"]
+            mapping = {**mapping_extra_fields(existing), **mapping}
             mappings[index] = self._sanitize_path_mapping(mapping)
             raw["path_mappings"] = mappings
             return self._save_raw(raw)

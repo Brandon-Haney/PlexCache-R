@@ -2865,16 +2865,18 @@ class MultiPathModifier:
                 logging.debug(f"Path already in real format, skipping: {plex_path}")
                 return (plex_path, mapping)
 
-        # Find matching mapping (longest prefix wins due to sort order)
+        # Find matching mapping (longest prefix wins due to sort order). A mapping
+        # without a plex_path (a library the Plex server doesn't have) never
+        # matches: "".startswith would match every path.
         for mapping in self.mappings:
-            if plex_path.startswith(mapping.plex_path):
+            if mapping.plex_path and plex_path.startswith(mapping.plex_path):
                 converted = plex_path.replace(mapping.plex_path, mapping.real_path, 1)
                 logging.debug(f"Converted path using '{mapping.name}': {plex_path} -> {converted}")
                 return (converted, mapping)
 
         # Check if path matches a disabled mapping (skip silently)
         for mapping in self.all_mappings:
-            if not mapping.enabled and plex_path.startswith(mapping.plex_path):
+            if not mapping.enabled and mapping.plex_path and plex_path.startswith(mapping.plex_path):
                 logging.debug(f"Skipping disabled mapping '{mapping.name}': {plex_path}")
                 return (plex_path, None)
 
@@ -2966,7 +2968,7 @@ class MultiPathModifier:
             The PathMapping that handles this path, or None.
         """
         for mapping in self.mappings:
-            if (path.startswith(mapping.plex_path) or
+            if ((mapping.plex_path and path.startswith(mapping.plex_path)) or
                 path.startswith(mapping.real_path) or
                 (mapping.cache_path and path.startswith(mapping.cache_path))):
                 return mapping
@@ -2998,7 +3000,7 @@ class MultiPathModifier:
             if mapping is None:
                 # Check if it matched a disabled mapping
                 for m in self.all_mappings:
-                    if not m.enabled and file_path.startswith(m.plex_path):
+                    if not m.enabled and m.plex_path and file_path.startswith(m.plex_path):
                         disabled_skips[m.name] = disabled_skips.get(m.name, 0) + 1
                         break
 

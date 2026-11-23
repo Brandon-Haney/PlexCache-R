@@ -18,6 +18,7 @@ from starlette.datastructures import ImmutableMultiDict
 from web.config import templates, CONFIG_DIR, PLEXCACHE_PRODUCT_VERSION
 from web.dependencies import parse_form
 from web.services import get_settings_service, get_scheduler_service
+from core.config import mapping_extra_fields
 from core.system_utils import get_disk_usage, detect_zfs, parse_size_bytes, size_setting_error, format_cache_age
 from core.file_operations import (
     PRIORITY_RANGE_ONDECK_MIN,
@@ -822,6 +823,8 @@ async def update_library_paths(request: Request, section_id: int):
         existing = all_mappings[idx]
 
         all_mappings[idx] = settings_service._sanitize_path_mapping({
+            # Fields this version doesn't read (a newer version's) stay as they are
+            **mapping_extra_fields(existing),
             "name": name,
             "plex_path": plex_path,
             "real_path": real_path,

@@ -68,6 +68,19 @@ class PathMapping:
     cacheable: bool = True
     enabled: bool = True
     section_id: Optional[int] = None  # Plex library section ID (links mapping to library)
+    # Fields this version doesn't use, written back as they were (a newer
+    # version's, e.g. after going back to this one)
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+
+# The path mapping fields this version reads; mapping_extra_fields() keeps the rest
+PATH_MAPPING_FIELDS = frozenset({
+    'name', 'plex_path', 'real_path', 'cache_path', 'host_cache_path', 'cacheable', 'enabled', 'section_id'})
+
+
+def mapping_extra_fields(mapping: Dict[str, Any]) -> Dict[str, Any]:
+    """A saved path mapping's fields this version doesn't read, to write back unchanged."""
+    return {key: value for key, value in mapping.items() if key not in PATH_MAPPING_FIELDS}
 
 
 @dataclass
@@ -718,15 +731,19 @@ class ConfigManager:
         for mapping_data in self.settings_data.get('path_mappings', []):
             cache_path = self._add_trailing_slashes(mapping_data['cache_path']) if mapping_data.get('cache_path') else None
             host_cache_path = self._add_trailing_slashes(mapping_data['host_cache_path']) if mapping_data.get('host_cache_path') else None
+            # An empty plex_path stays empty: a library the Plex server doesn't
+            # have. Made into "/", it would match every Plex path.
+            plex_path = mapping_data.get('plex_path') or ''
             mapping = PathMapping(
                 name=mapping_data.get('name', 'Unnamed'),
-                plex_path=self._add_trailing_slashes(mapping_data.get('plex_path', '')),
+                plex_path=self._add_trailing_slashes(plex_path) if plex_path.strip() else '',
                 real_path=self._add_trailing_slashes(mapping_data.get('real_path', '')),
                 cache_path=cache_path,
                 host_cache_path=host_cache_path,
                 cacheable=mapping_data.get('cacheable', True),
                 enabled=mapping_data.get('enabled', True),
-                section_id=mapping_data.get('section_id')
+                section_id=mapping_data.get('section_id'),
+                extra=mapping_extra_fields(mapping_data),
             )
             self.paths.path_mappings.append(mapping)
             if host_cache_path and host_cache_path != cache_path:
@@ -1026,7 +1043,8 @@ class ConfigManager:
                         'host_cache_path': m.host_cache_path,
                         'cacheable': m.cacheable,
                         'enabled': m.enabled,
-                        'section_id': m.section_id
+                        'section_id': m.section_id,
+                        **m.extra,
                     }
                     for m in self.paths.path_mappings
                 ]

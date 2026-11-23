@@ -53,6 +53,7 @@ def _image_tag_script():
 @pytest.mark.parametrize("event,ref,prerelease,expected", [
     ("push", "refs/heads/main", "", "dev"),
     ("push", "refs/heads/dev", "", "dev"),
+    ("push", "refs/heads/feature/media-servers", "", "jellyfin"),
     ("release", "refs/tags/v3.3.0", "false", "latest"),
     ("release", "refs/tags/v3.4.0-beta1", "true", "v3.4.0-beta1"),
 ])
@@ -63,4 +64,4 @@ def test_workflow_picks_the_image_tag(tmp_path, event, ref, prerelease, expected
     # Full path: on Windows a bare "bash" can start WSL's, which drops the environment
     subprocess.run([shutil.which("bash"), "-c", _image_tag_script()], env=env, cwd=tmp_path, check=True)
     assert (tmp_path / "github_output").read_text().strip() == f"value={expected}"
-    assert tag_label(expected) == {"dev": "DEV", "latest": "", "v3.4.0-beta1": "BETA 1"}[expected]
+    assert tag_label(expected) == {"dev": "DEV", "latest": "", "v3.4.0-beta1": "BETA 1", "jellyfin": "JELLYFIN"}[expected]

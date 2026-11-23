@@ -2,7 +2,8 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    branches: [dev, v3.0, main]
+    # feature/media-servers: fork only, publishes :jellyfin for testing (not for upstream)
+    branches: [dev, v3.0, main, feature/media-servers]
   pull_request:
     branches: [dev, v3.0, main]
   release:
@@ -52,7 +53,7 @@ jobs:
 
   build-and-push:
     needs: test
-    if: github.event_name == 'release' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+    if: github.event_name == 'release' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/feature/media-servers'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -88,6 +89,8 @@ jobs:
           tags: |
             # dev tag for main/dev pushes (rolling test channel, tracks merged work)
             type=raw,value=dev,enable=${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+            # jellyfin tag for the media servers test build (fork only)
+            type=raw,value=jellyfin,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/feature/media-servers' }}
             # semver tags from the published release's tag (v3.2.0 -> 3.2.0, 3.2, 3)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -103,7 +106,9 @@ jobs:
         env:
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" != release ]]; then
+          if [[ "$GITHUB_REF" == refs/heads/feature/media-servers ]]; then
+            echo "value=jellyfin" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" != release ]]; then
             echo "value=dev" >> "$GITHUB_OUTPUT"
           elif [[ "$PRERELEASE" == true ]]; then
             echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
